@@ -30,6 +30,7 @@ CODE_INTEGRATED_LUFS = -14.0
 CODE_TRUE_PEAK = -1.5
 CODE_LRA = 11.0
 CODE_FINAL_GAIN = 1.30
+CODE_COLOR_MODE = "bpm"  # "bpm" = original colors, "drive" = local drive colors
 
 
 
@@ -285,6 +286,59 @@ def estimate_bpm_curve_from_bass(bass, output_size, sample_rate=22050, hop=512, 
     return np.clip(curve, 30, 200).astype(np.float32)
 
 
+def normalize_feature(values):
+    values = np.asarray(values, dtype=np.float32)
+    if values.size == 0:
+        return values
+    low = float(np.percentile(values, 5))
+    high = float(np.percentile(values, 95))
+    if high <= low + 1e-8:
+        return np.zeros_like(values, dtype=np.float32)
+    return np.clip((values - low) / (high - low), 0, 1).astype(np.float32)
+
+
+def estimate_drive_curve(spectrum, rms, centroid, bpm_curve, output_size, sample_rate=22050, hop=512, window_seconds=3.0):
+    rms = np.asarray(rms, dtype=np.float32)
+    centroid = np.asarray(centroid, dtype=np.float32)
+    if rms.size == 0:
+        return np.zeros(output_size, dtype=np.float32)
+
+    onset = np.maximum(0, np.diff(rms, prepend=rms[0]))
+    frames_per_window = max(1, int(window_seconds * sample_rate / hop))
+    density = np.zeros_like(rms, dtype=np.float32)
+    for start in range(0, rms.size, frames_per_window):
+        end = min(rms.size, start + frames_per_window)
+        if end <= start:
+            continue
+        local = onset[start:end]
+        threshold = float(np.percentile(local, 70)) if local.size else 0.0
+        density[start:end] = np.count_nonzero(local > threshold) / max(1, end - start)
+
+    spectral_flux = np.zeros_like(rms, dtype=np.float32)
+    if spectrum.shape[1] > 1:
+        diff = np.diff(spectrum, axis=1, prepend=spectrum[:, :1])
+        spectral_flux = np.maximum(0, diff).mean(axis=0).astype(np.float32)
+
+    o = normalize_feature(density)
+    r = normalize_feature(rms)
+    f = normalize_feature(spectral_flux)
+    c = normalize_feature(centroid)
+    audio_drive = np.clip(0.4 * o + 0.3 * r + 0.2 * f + 0.1 * c, 0, 1)
+
+    local_bpm = resample_axis(np.asarray(bpm_curve, dtype=np.float32), audio_drive.size)
+    bpm_drive = np.clip((local_bpm - 55.0) / 125.0, 0, 1).astype(np.float32)
+    drive = np.clip(0.85 * audio_drive + 0.15 * bpm_drive, 0, 1)
+    for _ in range(3):
+        drive = (drive * 3 + np.roll(drive, 1) + np.roll(drive, -1)) / 5
+    return resample_axis(drive.astype(np.float32), output_size).astype(np.float32)
+
+
+def drive_to_hue(drive):
+    stops = np.asarray([0.00, 0.22, 0.44, 0.66, 0.84, 1.00], dtype=np.float32)
+    hues = np.asarray([0.77, 0.64, 0.36, 0.17, 0.07, 0.00], dtype=np.float32)
+    return np.interp(np.clip(drive, 0, 1), stops, hues).astype(np.float32)
+
+
 def peak_emphasis(values):
     values = values.astype(np.float32)
     smooth = values.copy()
@@ -335,11 +389,15 @@ def smooth_random_field(size, cells):
     return field
 
 
-def render_random_cover(spec, rms, bass, mids, highs, size, patterns=2, bpm=120.0, bpm_curve=None):
+def render_random_cover(spec, rms, bass, mids, highs, size, patterns=2, bpm=120.0, bpm_curve=None, color_mode="bpm", drive_curve=None):
     song_map = resize_spectrum(spec, freq_bins=size, time_bins=size)
     song_map = np.flipud(song_map)
     if bpm_curve is None:
         bpm_curve = np.full(size, bpm, dtype=np.float32)
+    if drive_curve is None:
+        drive_curve = np.full(size, 0.5, dtype=np.float32)
+    if color_mode not in {"bpm", "drive"}:
+        raise ValueError('color_mode must be "bpm" or "drive".')
 
     volume = resample_axis(rms, size)
     bass_line = resample_axis(bass, size)
@@ -365,22 +423,32 @@ def render_random_cover(spec, rms, bass, mids, highs, size, patterns=2, bpm=120.
     freq_idx = np.clip((base_freq + freq_warp).astype(np.int32), 0, size - 1)
 
     spectrum_value = song_map[freq_idx, part_idx]
-    local_bpm = bpm_curve[part_idx]
-
-    rng = np.random.default_rng()
-    bpm_sigma = 3.0 + 3.0 * peak_rows
-    pixel_bpm = rng.normal(local_bpm, bpm_sigma).astype(np.float32)
-    pixel_bpm -= np.mean(pixel_bpm, axis=1, keepdims=True) - np.mean(local_bpm, axis=1, keepdims=True)
-    pixel_bpm = np.clip(pixel_bpm, 30, 200)
-
-    hue_shift = (field_a - 0.5) * 0.035 + spectrum_value * 0.018
-    red_lock = np.clip((40.0 - pixel_bpm) / 10.0, 0, 1)
-    hue_shift = np.where(red_lock > 0, np.minimum(hue_shift, 0), hue_shift)
-    hue = np.mod(bpm_to_hue(pixel_bpm) + hue_shift, 1.0)
     bass_map = bass_line[part_idx]
     high_map = highs_line[part_idx]
-    saturation = np.clip(0.54 + spectrum_value * 0.24 + high_map * 0.10 + peak_rows * 0.18, 0, 1)
-    value = np.clip(0.12 + spectrum_value * 0.58 + volume[part_idx] * 0.28 + bass_map * 0.12 + peak_rows * 0.38, 0, 1)
+
+    rng = np.random.default_rng()
+    if color_mode == "drive":
+        local_drive = drive_curve[part_idx]
+        drive_sigma = 0.018 + 0.026 * peak_rows
+        pixel_drive = rng.normal(local_drive, drive_sigma).astype(np.float32)
+        pixel_drive -= np.mean(pixel_drive, axis=1, keepdims=True) - np.mean(local_drive, axis=1, keepdims=True)
+        pixel_drive = np.clip(pixel_drive + (spectrum_value - 0.5) * 0.018, 0, 1)
+        hue = drive_to_hue(pixel_drive)
+        saturation = np.clip(0.62 + spectrum_value * 0.18 + high_map * 0.08 + peak_rows * 0.12, 0, 1)
+        value = np.clip(0.14 + spectrum_value * 0.56 + volume[part_idx] * 0.26 + bass_map * 0.12 + peak_rows * 0.30, 0, 1)
+    else:
+        local_bpm = bpm_curve[part_idx]
+        bpm_sigma = 3.0 + 3.0 * peak_rows
+        pixel_bpm = rng.normal(local_bpm, bpm_sigma).astype(np.float32)
+        pixel_bpm -= np.mean(pixel_bpm, axis=1, keepdims=True) - np.mean(local_bpm, axis=1, keepdims=True)
+        pixel_bpm = np.clip(pixel_bpm, 30, 200)
+
+        hue_shift = (field_a - 0.5) * 0.035 + spectrum_value * 0.018
+        red_lock = np.clip((40.0 - pixel_bpm) / 10.0, 0, 1)
+        hue_shift = np.where(red_lock > 0, np.minimum(hue_shift, 0), hue_shift)
+        hue = np.mod(bpm_to_hue(pixel_bpm) + hue_shift, 1.0)
+        saturation = np.clip(0.54 + spectrum_value * 0.24 + high_map * 0.10 + peak_rows * 0.18, 0, 1)
+        value = np.clip(0.12 + spectrum_value * 0.58 + volume[part_idx] * 0.28 + bass_map * 0.12 + peak_rows * 0.38, 0, 1)
 
     rgb = hsv_to_rgb_array(hue, saturation, value)
     edge_pattern = np.abs(np.gradient(field_a, axis=0)) + np.abs(np.gradient(field_b, axis=1))
@@ -531,12 +599,27 @@ def add_center_title(image, title, square_ratio=0.62):
     return Image.alpha_composite(base, overlay).convert("RGB")
 
 
-def make_cover(audio_path, output_path, size=1000, patterns=2, center_title=False):
+def make_cover(audio_path, output_path, size=1000, patterns=2, center_title=False, color_mode="bpm"):
     audio = read_audio(audio_path)
-    spectrum, rms, bass, mids, highs, _ = stft_features(audio)
+    spectrum, rms, bass, mids, highs, centroid = stft_features(audio)
     bpm = estimate_bpm(rms)
     bpm_curve = estimate_bpm_curve_from_bass(bass, size)
-    rgb = render_random_cover(spectrum, rms, bass, mids, highs, size, patterns=patterns, bpm=bpm, bpm_curve=bpm_curve)
+    drive_curve = None
+    if color_mode == "drive":
+        drive_curve = estimate_drive_curve(spectrum, rms, centroid, bpm_curve, size)
+    rgb = render_random_cover(
+        spectrum,
+        rms,
+        bass,
+        mids,
+        highs,
+        size,
+        patterns=patterns,
+        bpm=bpm,
+        bpm_curve=bpm_curve,
+        color_mode=color_mode,
+        drive_curve=drive_curve,
+    )
 
     image = Image.fromarray(rgb, "RGB")
     image = ImageEnhance.Color(image).enhance(1.18)
@@ -547,7 +630,10 @@ def make_cover(audio_path, output_path, size=1000, patterns=2, center_title=Fals
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(output_path)
-    print(f"Cover saved: {output_path} (BPM: {bpm:.1f}, local BPM: {float(np.min(bpm_curve)):.1f}-{float(np.max(bpm_curve)):.1f})")
+    if drive_curve is not None:
+        print(f"Cover saved: {output_path} (mode: drive, BPM: {bpm:.1f}, drive: {float(np.min(drive_curve)):.2f}-{float(np.max(drive_curve)):.2f})")
+    else:
+        print(f"Cover saved: {output_path} (mode: bpm, BPM: {bpm:.1f}, local BPM: {float(np.min(bpm_curve)):.1f}-{float(np.max(bpm_curve)):.1f})")
     return output_path
 
 
@@ -589,7 +675,7 @@ def embed_cover(mp3_path, image_path):
     print(f"Embedded cover into: {mp3_path}")
 
 
-def make_covers(source, output, size=1000, patterns=2, center_title=False, embed=False):
+def make_covers(source, output, size=1000, patterns=2, center_title=False, embed=False, color_mode="bpm"):
     source_path = Path(source).resolve()
     output_root = Path(output).resolve()
     files = audio_files(source_path)
@@ -600,7 +686,7 @@ def make_covers(source, output, size=1000, patterns=2, center_title=False, embed
     for index, audio_path in enumerate(files, start=1):
         target = output_root / f"{clean_stem(audio_path)}_cover_{size}.png"
         print(f"[{index}/{len(files)}] Cover: {audio_path.name}")
-        cover_path = make_cover(audio_path, target, size=size, patterns=patterns, center_title=center_title)
+        cover_path = make_cover(audio_path, target, size=size, patterns=patterns, center_title=center_title, color_mode=color_mode)
         if embed:
             embed_cover(audio_path, cover_path)
 
@@ -624,6 +710,7 @@ def main():
     covers.add_argument("--patterns", type=int, choices=[1, 2], default=2)
     covers.add_argument("--center-title", action="store_true", help="Draw the file name in the center.")
     covers.add_argument("--embed-cover", action="store_true", help="Attach the generated image as MP3 cover art.")
+    covers.add_argument("--color-mode", choices=["bpm", "drive"], default="bpm", help="bpm keeps original colors; drive colors local song drive from violet to red.")
 
     args = parser.parse_args()
     require_ffmpeg()
@@ -631,7 +718,7 @@ def main():
     if args.command == "process":
         normalize_music(args.source, args.output, args.integrated_lufs, args.true_peak, args.lra, args.final_gain)
     elif args.command == "covers":
-        make_covers(args.source, args.output, args.size, args.patterns, args.center_title, args.embed_cover)
+        make_covers(args.source, args.output, args.size, args.patterns, args.center_title, args.embed_cover, color_mode=args.color_mode)
 
 
 def run_from_code_settings():
@@ -653,6 +740,7 @@ def run_from_code_settings():
             patterns=CODE_PATTERNS,
             center_title=CODE_CENTER_TITLE,
             embed=CODE_EMBED_COVER,
+            color_mode=CODE_COLOR_MODE,
         )
     else:
         raise ValueError('CODE_MODE must be "covers" or "process".')

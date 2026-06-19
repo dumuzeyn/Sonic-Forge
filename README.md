@@ -1,501 +1,539 @@
 # MusicPolisher
 
-MusicPolisher - проект для людей, которые любят скачивать свои любимые песни и хотят, чтобы папка с музыкой быстро становилась аккуратнее: звук нормализован, название песни записано в теги, жанр указан, лишние метаданные убраны, а у каждой песни есть своя интересная обложка.
+[English version](#engFer)
 
-Идея проекта: выбрать папку с скаченными песнями, выбрать папку для результата, при желании указать жанр всех песен в папке **(если ничего не писать жанр определиться автоматически)**, и получить обработанную коллекцию с минимальной систематизацией.
+MusicPolisher - инструмент для быстрой подготовки музыкальной папки:
 
-[English version](#engMP)
+- нормализует и безопасно усиливает звук;
+- конвертирует обработанные треки в MP3;
+- записывает чистый тег `title` из имени файла;
+- записывает `genre` только если у песни еще нет жанра;
+- создает сгенерированную обложку для каждой песни;
+- встраивает созданную обложку в MP3-файл.
 
-## Что делает проект
+Главный простой файл для запуска - `easy_music_process.py`. Отдельные скрипты тоже можно запускать напрямую.
 
-- Нормализует и усиливает звук.
-- Конвертирует обработанные треки в MP3.
-- Записывает название песни в тег `title`.
-- Записывает жанр в тег `genre`.
-- Если жанр не указан, пытается определить его автоматически.
-- Очищает лишние метаданные и оставляет только название и жанр.
-- Создает отдельную обложку для каждой песни.
-- Встраивает созданную обложку в MP3-файл.
+## Требования
 
-## Самый простой запуск
-
-Главный простой файл:
-
-```text
-easy_music_process.py
-```
-
-Запуск из папки проекта:
-
-```powershell
-python .\easy_music_process.py
-```
-
-Программа спросит:
-
-```text
-Папка с песнями:
-Папка, куда все сохранить:
-Жанр для всех песен или Enter для автоопределения:
-```
-
-Если написать жанр, например:
-
-```text
-Rock
-```
-
-то этот жанр будет записан во все песни.
-
-Если просто нажать Enter, программа сама попробует определить жанр для каждой песни.
-
-## Быстрый запуск одной командой
-
-```powershell
-python .\easy_music_process.py --source "C:\Music\Input" --output "C:\Music\Output" --genre "Pop"
-```
-
-Автоопределение жанра:
-
-```powershell
-python .\easy_music_process.py --source "C:\Music\Input" --output "C:\Music\Output"
-```
-
-## Как работает простой файл
-
-`easy_music_process.py` сам не выполняет всю работу. Он только запускает функции из трех основных файлов проекта:
-
-```text
-Normalize-Music.py  -> нормализация и усиление звука
-music_metadata.py   -> очистка и запись title/genre
-music2picture.py    -> создание и встраивание обложек
-```
-
-Порядок работы:
-
-1. Обрабатывает звук и сохраняет новые MP3-файлы в выбранную папку.
-2. Записывает название песни и жанр.
-3. Создает PNG-обложки в папке `covers`.
-4. Встраивает каждую обложку в соответствующую песню.
-
-## Зависимости
-
-Нужен Python и две библиотеки:
+Установить Python-библиотеки:
 
 ```powershell
 pip install numpy pillow
 ```
 
-Также нужен FFmpeg. Он должен быть доступен из PowerShell:
+FFmpeg и FFprobe должны быть доступны из PowerShell:
 
 ```powershell
 ffmpeg -version
 ffprobe -version
 ```
 
-Официальная страница FFmpeg:
+Поддерживаемые входные аудиоформаты:
 
 ```text
-https://ffmpeg.org/download.html
+.mp3 .flac .wav .m4a .aac .ogg .opus .wma
 ```
 
-Для Windows можно использовать сборки:
+Результат обработки сохраняется как MP3.
 
-```text
-https://www.gyan.dev/ffmpeg/builds/
-```
+## Easy Music Process
 
-Обычно достаточно скачать `release essentials`, распаковать, например в:
+`easy_music_process.py` запускает весь процесс:
 
-```text
-C:\ffmpeg
-```
+1. `Normalize-Music.py` нормализует, мягко очищает шум, безопасно усиливает и экспортирует MP3.
+2. `music_metadata.py` записывает чистые метаданные `title` и `genre`.
+3. `music2picture.py` создает обложки и встраивает их в обработанные MP3-файлы.
 
-и добавить в `Path` папку:
+### Запуск через консоль
 
-```text
-C:\ffmpeg\bin
-```
-
-### Правильная установка FFmpeg на Windows
-
-1. Откройте страницу сборок FFmpeg:
-
-```text
-https://www.gyan.dev/ffmpeg/builds/
-```
-
-2. Скачайте архив `release essentials`.
-3. Распакуйте архив в удобное место, например:
-
-```text
-C:\ffmpeg
-```
-
-4. Проверьте, что внутри есть папка `bin`, а в ней файлы:
-
-```text
-ffmpeg.exe
-ffprobe.exe
-```
-
-Правильный путь обычно выглядит так:
-
-```text
-C:\ffmpeg\bin\ffmpeg.exe
-C:\ffmpeg\bin\ffprobe.exe
-```
-
-5. Добавьте папку `C:\ffmpeg\bin` в системную переменную `Path`.
-
-Как добавить в `Path`:
-
-1. Нажмите `Win + R`.
-2. Введите `sysdm.cpl` и нажмите Enter.
-3. Откройте вкладку `Дополнительно`.
-4. Нажмите `Переменные среды`.
-5. В разделе `Системные переменные` найдите `Path`.
-6. Нажмите `Изменить`.
-7. Нажмите `Создать`.
-8. Добавьте:
-
-```text
-C:\ffmpeg\bin
-```
-
-9. Нажмите `OK` во всех окнах.
-10. Закройте старый PowerShell и откройте новый.
-11. Проверьте установку:
-
-```powershell
-ffmpeg -version
-ffprobe -version
-```
-
-Если обе команды показывают версию, FFmpeg установлен правильно.
-
-## Поддерживаемые форматы
-
-Входные файлы:
-
-```text
-.mp3
-.flac
-.wav
-.m4a
-.aac
-.ogg
-.opus
-.wma
-```
-
-Результат сохраняется как MP3. Встраивание обложки поддерживается для MP3.
-
-## Остальные файлы
-
-Можно пользоваться отдельными частями проекта напрямую.
-
-### Только нормализация
-
-```powershell
-python .\Normalize-Music.py --source "C:\Music\Input" --output "C:\Music\Output"
-```
-
-### Только метаданные
-
-Один жанр для всех песен:
-
-```powershell
-python .\music_metadata.py --source "C:\Music\Output" --genre "Rock"
-```
-
-Автоопределение жанра:
-
-```powershell
-python .\music_metadata.py --source "C:\Music\Output"
-```
-
-### Только обложки
-
-Создать обложки и встроить их в MP3:
-
-```powershell
-python .\music2picture.py covers --source "C:\Music\Output" --output "C:\Music\Output\covers" --center-title --embed-cover
-```
-
-## Как создаются обложки
-
-Обложка строится из самой песни. Скрипт анализирует громкость, басы, средние и высокие частоты, пики и примерный BPM. На основе этих данных создается уникальный цветной узор.
-
-Обложки не одинаковые даже при похожих песнях: в генерации есть случайность, но она направляется характеристиками аудио. Поэтому изображение выглядит живым и связано с треком.
-
-## Примеры
-
-В папке `example` есть тестовые песни и готовые обложки.
-
-```text
-example/Im so sorry.mp3
-example/Into Yesterday.mp3
-example/INVISIBLE.mp3
-```
-
-Папки с примерами:
-
-```text
-example/covers_no_title
-example/covers_with_title
-```
-
-
-> **Автор проекта: Зейналов У.Р.о.**
-
----
-<h1 id = engMP>
-English Version
-</h1>
-
-MusicPolisher is a project for people who like downloading their favorite songs and want their music folder to become cleaner with minimal effort: normalized audio, proper song titles, genre tags, removed extra metadata, and a unique interesting cover for every track.
-
-The idea of ​​the project: select a folder with downloaded songs, select a folder for the result, optionally specify the genre of all songs in the folder **(if you don’t specify anything, the genre will be determined automatically)**, and get a processed collection with minimal systematization.
-
-## What It Does
-
-- Normalizes and boosts audio.
-- Converts processed tracks to MP3.
-- Writes the song name to the `title` tag.
-- Writes the genre to the `genre` tag.
-- If no genre is entered, tries to detect it automatically.
-- Removes extra metadata and keeps only title and genre.
-- Creates a separate cover image for every song.
-- Embeds the generated cover into the MP3 file.
-
-## Easiest Usage
-
-Main simple file:
-
-```text
-easy_music_process.py
-```
-
-Run from the project folder:
+Интерактивный режим:
 
 ```powershell
 python .\easy_music_process.py
 ```
 
-The program asks for:
-
-```text
-Folder with songs
-Folder where everything will be saved
-Genre for all songs, or Enter for auto-detect
-```
-
-If you enter a genre, for example:
-
-```text
-Rock
-```
-
-that genre will be used for every song.
-
-If you press Enter, the program will try to detect the genre for each song automatically.
-
-## One-Command Usage
-
-```powershell
-python .\easy_music_process.py --source "C:\Music\Input" --output "C:\Music\Output" --genre "Pop"
-```
-
-Auto-detect genre:
+Запуск одной командой:
 
 ```powershell
 python .\easy_music_process.py --source "C:\Music\Input" --output "C:\Music\Output"
 ```
 
-## How The Simple File Works
+Указать жанр только для песен, у которых жанра еще нет:
 
-`easy_music_process.py` does not duplicate the main logic. It only calls functions from the three main project files:
-
-```text
-Normalize-Music.py  -> audio normalization and boost
-music_metadata.py   -> title/genre cleanup and writing
-music2picture.py    -> cover generation and embedding
+```powershell
+python .\easy_music_process.py --source "C:\Music\Input" --output "C:\Music\Output" --genre "Rock"
 ```
 
-Processing order:
+Использовать старые цвета обложек вместо нового режима драйвовости:
 
-1. Processes audio and saves new MP3 files to the selected output folder.
-2. Writes song title and genre.
-3. Creates PNG covers in the `covers` folder.
-4. Embeds each cover into the matching song.
+```powershell
+python .\easy_music_process.py --source "C:\Music\Input" --output "C:\Music\Output" --color-mode bpm
+```
+
+### Запуск из PyCharm / напрямую из кода
+
+Откройте `easy_music_process.py`, измените значения вверху файла, поставьте `RUN_FROM_CODE = True` и нажмите Run:
+
+```python
+RUN_FROM_CODE = True
+CODE_SOURCE = r"C:\Music\Input"
+CODE_OUTPUT = r"C:\Music\Output"
+CODE_GENRE = None
+CODE_COLOR_MODE = "drive"
+CODE_FINAL_GAIN = 1.15
+CODE_DENOISE = True
+CODE_DENOISE_STRENGTH = 4.0
+CODE_LIMITER = True
+CODE_OVERWRITE_GENRE = False
+```
+
+Когда `RUN_FROM_CODE = False`, этот же файл работает как обычная консольная программа.
+
+## Изменения нормализации звука
+
+Старый скрипт нормализовал звук, а потом применял сильное дополнительное усиление `1.30`. На некоторых песнях из-за этого могли появляться шумы, резкость или артефакты после повышения громкости.
+
+Новая цепочка по умолчанию более аккуратная:
+
+1. очень мягкое FFT-шумоподавление: `afftdn=nr=4:nf=-70`;
+2. двухпроходный FFmpeg `loudnorm` с целью `-14 LUFS`, `-1.5 dBTP`, `11 LRA`;
+3. меньшее дополнительное усиление: `1.15` вместо `1.30`;
+4. финальный лимитер: `alimiter=limit=0.95:attack=5:release=80`.
+
+Это сделано, чтобы уменьшить шипение/артефакты от усиления и при этом не испортить музыку сильной обработкой. Если конкретный трек звучит лучше без шумоподавления, его можно выключить:
+
+```powershell
+python .\Normalize-Music.py --source "C:\Music\Input" --output "C:\Music\Output" --no-denoise
+```
+
+Если нужно больше или меньше шумоподавления:
+
+```powershell
+python .\Normalize-Music.py --source "C:\Music\Input" --output "C:\Music\Output" --denoise-strength 3
+```
+
+Скрипт теперь принимает и папку, и один аудиофайл:
+
+```powershell
+python .\Normalize-Music.py --source "C:\Music\Input\In the Sea.mp3" --output "C:\Music\Output"
+```
+
+## Поведение метаданных
+
+`music_metadata.py` теперь защищает существующие жанры.
+
+Для каждой песни скрипт сначала читает текущий тег `genre` через FFprobe:
+
+- если жанр уже есть, он сохраняется;
+- если жанра нет, используется `--genre`, ручной выбор или автоопределение;
+- `title` все равно очищается по имени файла;
+- лишние метаданные все равно удаляются, но сохраненный жанр записывается обратно.
+
+Пример: эта команда не заменит существующий жанр `Anime` на `Rock`, если не включить принудительную перезапись:
+
+```powershell
+python .\music_metadata.py --source "C:\Music\Output" --genre "Rock"
+```
+
+Принудительно заменить существующие жанры:
+
+```powershell
+python .\music_metadata.py --source "C:\Music\Output" --genre "Rock" --overwrite-genre
+```
+
+Проверка без изменения файлов:
+
+```powershell
+python .\music_metadata.py --source "C:\Music\Output" --genre "Rock" --dry-run
+```
+
+## Цветовые режимы обложек
+
+В `music2picture.py` есть два цветовых режима.
+
+### Режим `bpm`
+
+Это старое поведение из GitHub-версии. Узор и цвета в основном зависят от примерного BPM/local BPM. Режим остался доступен и используется по умолчанию, если запускать `music2picture.py` напрямую:
+
+```powershell
+python .\music2picture.py covers --source "C:\Music\Output" --output "C:\Music\Output\covers" --color-mode bpm
+```
+
+### Режим `drive`
+
+Это новый второй режим. Он меняет только цвета. Геометрия узора, искажения, отрисовка названия и встраивание обложки остаются такими же.
+
+Цвет зависит от локальной драйвовости участка песни, а не только от BPM всей песни. Для каждого локального окна считается:
+
+```text
+D(t) = 0.4 * O(t) + 0.3 * R(t) + 0.2 * F(t) + 0.1 * C(t)
+```
+
+Где каждый показатель нормализуется в диапазон `0..1`:
+
+- `O(t)` = плотность атак/onset, сколько новых звуков появляется в окне;
+- `R(t)` = RMS-энергия/громкость;
+- `F(t)` = spectral flux, насколько быстро меняется звук;
+- `C(t)` = spectral centroid, насколько звук яркий и высокочастотный.
+
+Потом мягко добавляется влияние локального BPM:
+
+```text
+drive = 0.85 * D(t) + 0.15 * local_bpm_score
+```
+
+Палитра использует меньше цветов, но они сильнее отличаются друг от друга:
+
+```text
+медленно / низкий драйв       -> фиолетовый
+низко-средний драйв           -> темно-синий / синий
+средний драйв                 -> зеленый
+средне-высокий драйв          -> желтый
+высокий драйв                 -> оранжевый
+быстро / максимальный драйв   -> красный
+```
+
+Создать обложки в режиме `drive`:
+
+```powershell
+python .\music2picture.py covers --source "C:\Music\Output" --output "C:\Music\Output\covers_drive" --color-mode drive
+```
+
+Создать обложки в режиме `drive` с названием по центру:
+
+```powershell
+python .\music2picture.py covers --source "C:\Music\Output" --output "C:\Music\Output\covers_drive_title" --color-mode drive --center-title
+```
+
+Создать и встроить обложки в MP3:
+
+```powershell
+python .\music2picture.py covers --source "C:\Music\Output" --output "C:\Music\Output\covers" --color-mode drive --center-title --embed-cover
+```
+
+## Прямой запуск отдельных скриптов
+
+Только нормализация:
+
+```powershell
+python .\Normalize-Music.py --source "C:\Music\Input" --output "C:\Music\Output"
+```
+
+Только метаданные:
+
+```powershell
+python .\music_metadata.py --source "C:\Music\Output"
+```
+
+Только обложки, старый режим:
+
+```powershell
+python .\music2picture.py covers --source "C:\Music\Output" --output "C:\Music\Output\covers_bpm" --color-mode bpm
+```
+
+Только обложки, режим драйвовости:
+
+```powershell
+python .\music2picture.py covers --source "C:\Music\Output" --output "C:\Music\Output\covers_drive" --color-mode drive
+```
+
+## Практический пример
+
+Для трека, на котором раньше могли появляться шумы после усиления:
+
+```powershell
+python .\Normalize-Music.py --source "C:\Users\Rasul\Music\MyMusicCollection\Музыка\In the Sea.mp3" --output ".\_verify_normalized"
+```
+
+Создать тестовую обложку в режиме `drive`:
+
+```powershell
+python .\music2picture.py covers --source "C:\Users\Rasul\Music\MyMusicCollection\Музыка\In the Sea.mp3" --output ".\_verify_covers" --size 256 --color-mode drive
+```
+
+Проверить, что существующий жанр сохраняется:
+
+```powershell
+python .\music_metadata.py --source ".\_verify_normalized\In the Sea.mp3" --genre "Rock" --dry-run
+```
+
+Ожидаемое поведение: если у `In the Sea.mp3` уже есть `Anime`, dry-run показывает, что `Anime` сохранен.
+
+## Примечания
+
+- `easy_music_process.py` по умолчанию использует `--color-mode drive`, потому что это новый улучшенный режим обложек.
+- `music2picture.py covers` по умолчанию использует `--color-mode bpm`, чтобы старое поведение оставалось доступным без изменений.
+- Существующие теги `genre` сохраняются, если не использовать `--overwrite-genre`.
+- Если конкретная песня требует более прозрачного звучания, можно уменьшить `--final-gain` или использовать `--no-denoise`.
+
+>**Автор проекта: Зейналов У.Р.о.**
+---
+<h1 id = engFer>
+MusicPolisher
+</h1>
+
+MusicPolisher is an all-in-one tool for preparing a music folder:
+
+- normalizes and safely boosts audio;
+- converts processed tracks to MP3;
+- writes a clean `title` tag from the file name;
+- writes `genre` only when the song does not already have one;
+- creates a generated cover for every song;
+- embeds the generated cover into the MP3 file.
+
+The main easy entry point is `easy_music_process.py`. The separate scripts can still be used directly.
 
 ## Requirements
 
-Python packages:
+Install Python packages:
 
 ```powershell
 pip install numpy pillow
 ```
 
-FFmpeg is also required. It must be available from PowerShell:
+FFmpeg and FFprobe must be available from PowerShell:
 
 ```powershell
 ffmpeg -version
 ffprobe -version
 ```
 
-Official FFmpeg page:
+Supported input audio formats:
 
 ```text
-https://ffmpeg.org/download.html
+.mp3 .flac .wav .m4a .aac .ogg .opus .wma
 ```
 
-Windows builds:
+Processed output is written as MP3.
 
-```text
-https://www.gyan.dev/ffmpeg/builds/
-```
+## Easy Music Process
 
-Usually you can download `release essentials`, extract it, for example to:
+`easy_music_process.py` runs the full pipeline:
 
-```text
-C:\ffmpeg
-```
+1. `Normalize-Music.py` normalizes, gently denoises, safely boosts, and exports MP3 files.
+2. `music_metadata.py` writes clean `title` and `genre` metadata.
+3. `music2picture.py` creates covers and embeds them into the processed MP3 files.
 
-and add this folder to `Path`:
+### Console usage
 
-```text
-C:\ffmpeg\bin
-```
-
-### Correct FFmpeg Installation On Windows
-
-1. Open the FFmpeg builds page:
-
-```text
-https://www.gyan.dev/ffmpeg/builds/
-```
-
-2. Download the `release essentials` archive.
-3. Extract the archive to a simple folder, for example:
-
-```text
-C:\ffmpeg
-```
-
-4. Check that there is a `bin` folder inside it, and that it contains:
-
-```text
-ffmpeg.exe
-ffprobe.exe
-```
-
-The correct paths usually look like this:
-
-```text
-C:\ffmpeg\bin\ffmpeg.exe
-C:\ffmpeg\bin\ffprobe.exe
-```
-
-5. Add `C:\ffmpeg\bin` to the system `Path` variable.
-
-How to add it to `Path`:
-
-1. Press `Win + R`.
-2. Type `sysdm.cpl` and press Enter.
-3. Open the `Advanced` tab.
-4. Click `Environment Variables`.
-5. In `System variables`, find `Path`.
-6. Click `Edit`.
-7. Click `New`.
-8. Add:
-
-```text
-C:\ffmpeg\bin
-```
-
-9. Click `OK` in all windows.
-10. Close the old PowerShell window and open a new one.
-11. Check the installation:
+Interactive mode:
 
 ```powershell
-ffmpeg -version
-ffprobe -version
+python .\easy_music_process.py
 ```
 
-If both commands show a version, FFmpeg is installed correctly.
-
-## Supported Formats
-
-Input files:
-
-```text
-.mp3
-.flac
-.wav
-.m4a
-.aac
-.ogg
-.opus
-.wma
-```
-
-The result is saved as MP3. Cover embedding is supported for MP3.
-
-## Other Files
-
-You can also use each part directly.
-
-### Normalize Only
+One-command mode:
 
 ```powershell
-python .\Normalize-Music.py --source "C:\Music\Input" --output "C:\Music\Output"
+python .\easy_music_process.py --source "C:\Music\Input" --output "C:\Music\Output"
 ```
 
-### Metadata Only
+Set a genre only for songs that do not already have a genre:
 
-One genre for all songs:
+```powershell
+python .\easy_music_process.py --source "C:\Music\Input" --output "C:\Music\Output" --genre "Rock"
+```
+
+Use the original cover colors instead of the new drive colors:
+
+```powershell
+python .\easy_music_process.py --source "C:\Music\Input" --output "C:\Music\Output" --color-mode bpm
+```
+
+### PyCharm / direct code run
+
+Open `easy_music_process.py`, edit these values near the top, then set `RUN_FROM_CODE = True` and press Run:
+
+```python
+RUN_FROM_CODE = True
+CODE_SOURCE = r"C:\Music\Input"
+CODE_OUTPUT = r"C:\Music\Output"
+CODE_GENRE = None
+CODE_COLOR_MODE = "drive"
+CODE_FINAL_GAIN = 1.15
+CODE_DENOISE = True
+CODE_DENOISE_STRENGTH = 4.0
+CODE_LIMITER = True
+CODE_OVERWRITE_GENRE = False
+```
+
+When `RUN_FROM_CODE` is `False`, the same file works as a normal console program.
+
+## Audio Normalization Changes
+
+The old script normalized audio and then applied a strong extra gain of `1.30`. On some songs this could expose noise or create harsh artifacts after the volume increase.
+
+The new default chain is more conservative:
+
+1. very gentle FFT denoise: `afftdn=nr=4:nf=-70`;
+2. two-pass FFmpeg `loudnorm` to target `-14 LUFS`, `-1.5 dBTP`, `11 LRA`;
+3. smaller extra gain: `1.15` instead of `1.30`;
+4. final limiter: `alimiter=limit=0.95:attack=5:release=80`.
+
+This is meant to reduce hiss/artifacts from boosting without heavily damaging the music. If a track sounds better without denoise, disable it:
+
+```powershell
+python .\Normalize-Music.py --source "C:\Music\Input" --output "C:\Music\Output" --no-denoise
+```
+
+If you need more or less denoise:
+
+```powershell
+python .\Normalize-Music.py --source "C:\Music\Input" --output "C:\Music\Output" --denoise-strength 3
+```
+
+The script now accepts either a folder or one audio file:
+
+```powershell
+python .\Normalize-Music.py --source "C:\Music\Input\In the Sea.mp3" --output "C:\Music\Output"
+```
+
+## Metadata Behavior
+
+`music_metadata.py` now protects existing genres.
+
+For every song it first reads the current `genre` tag with FFprobe:
+
+- if a genre already exists, that genre is kept;
+- if there is no genre, the script uses `--genre`, manual choice, or auto-detection;
+- title is still cleaned from the file name;
+- extra metadata is still removed, but the preserved genre is written back.
+
+Example: this command will not replace an existing `Anime` genre with `Rock` unless overwrite is requested:
 
 ```powershell
 python .\music_metadata.py --source "C:\Music\Output" --genre "Rock"
 ```
 
-Auto-detect genre:
+To force replacement of existing genres:
+
+```powershell
+python .\music_metadata.py --source "C:\Music\Output" --genre "Rock" --overwrite-genre
+```
+
+Dry-run check:
+
+```powershell
+python .\music_metadata.py --source "C:\Music\Output" --genre "Rock" --dry-run
+```
+
+## Cover Color Modes
+
+`music2picture.py` has two color modes.
+
+### `bpm` mode
+
+This is the original GitHub behavior. The cover pattern and colors are driven mainly by estimated BPM/local BPM. It remains available and is the default when using `music2picture.py` directly:
+
+```powershell
+python .\music2picture.py covers --source "C:\Music\Output" --output "C:\Music\Output\covers" --color-mode bpm
+```
+
+### `drive` mode
+
+This is the new second mode. It changes only the colors. The pattern geometry, warping, title drawing, and embedding logic stay the same.
+
+Color is based on local song drive/dynamics, not only whole-song BPM. For each local window the script computes:
+
+```text
+D(t) = 0.4 * O(t) + 0.3 * R(t) + 0.2 * F(t) + 0.1 * C(t)
+```
+
+Where every feature is normalized to `0..1`:
+
+- `O(t)` = onset/attack density, how many new sounds appear in the window;
+- `R(t)` = RMS energy/loudness;
+- `F(t)` = spectral flux, how quickly the sound changes;
+- `C(t)` = spectral centroid, how bright/high-frequency the sound is.
+
+Local BPM influence is then added gently:
+
+```text
+drive = 0.85 * D(t) + 0.15 * local_bpm_score
+```
+
+The palette uses fewer, more distinct colors:
+
+```text
+slow / low drive    -> violet
+low-medium drive    -> dark blue / blue
+medium drive        -> green
+medium-high drive   -> yellow
+high drive          -> orange
+fast / high drive   -> red
+```
+
+Generate drive-mode covers:
+
+```powershell
+python .\music2picture.py covers --source "C:\Music\Output" --output "C:\Music\Output\covers_drive" --color-mode drive
+```
+
+Generate drive-mode covers with centered title text:
+
+```powershell
+python .\music2picture.py covers --source "C:\Music\Output" --output "C:\Music\Output\covers_drive_title" --color-mode drive --center-title
+```
+
+Generate and embed drive-mode covers into MP3 files:
+
+```powershell
+python .\music2picture.py covers --source "C:\Music\Output" --output "C:\Music\Output\covers" --color-mode drive --center-title --embed-cover
+```
+
+## Direct Script Usage
+
+Normalize only:
+
+```powershell
+python .\Normalize-Music.py --source "C:\Music\Input" --output "C:\Music\Output"
+```
+
+Metadata only:
 
 ```powershell
 python .\music_metadata.py --source "C:\Music\Output"
 ```
 
-### Covers Only
-
-Create covers and embed them into MP3 files:
+Covers only, original mode:
 
 ```powershell
-python .\music2picture.py covers --source "C:\Music\Output" --output "C:\Music\Output\covers" --center-title --embed-cover
+python .\music2picture.py covers --source "C:\Music\Output" --output "C:\Music\Output\covers_bpm" --color-mode bpm
 ```
 
-## How Covers Are Generated
+Covers only, drive mode:
 
-The cover is generated from the song itself. The script analyzes loudness, bass, mids, highs, peaks, and estimated BPM. These values drive a unique colorful pattern.
-
-Covers are not identical even for similar songs: generation includes randomness, but the randomness is guided by the audio features. This makes the image feel alive and connected to the track.
-
-## Examples
-
-The `example` folder contains test songs and generated covers.
-
-```text
-example/Im so sorry.mp3
-example/Into Yesterday.mp3
-example/INVISIBLE.mp3
+```powershell
+python .\music2picture.py covers --source "C:\Music\Output" --output "C:\Music\Output\covers_drive" --color-mode drive
 ```
 
-Example cover folders:
+## Practical Example
 
-```text
-example/covers_no_title
-example/covers_with_title
+For the track that previously exposed noise during boosting:
+
+```powershell
+python .\Normalize-Music.py --source "C:\Users\Rasul\Music\MyMusicCollection\Музыка\In the Sea.mp3" --output ".\_verify_normalized"
 ```
 
-> **Author of project: Zeynalov U.R.o.**
+Generate a drive-color test cover:
+
+```powershell
+python .\music2picture.py covers --source "C:\Users\Rasul\Music\MyMusicCollection\Музыка\In the Sea.mp3" --output ".\_verify_covers" --size 256 --color-mode drive
+```
+
+Check that an existing genre is preserved:
+
+```powershell
+python .\music_metadata.py --source ".\_verify_normalized\In the Sea.mp3" --genre "Rock" --dry-run
+```
+
+Expected behavior: if `In the Sea.mp3` already has `Anime`, dry-run shows that `Anime` is kept.
+
+## Notes
+
+- `easy_music_process.py` defaults to `--color-mode drive` because this is the newer polished cover mode.
+- `music2picture.py covers` defaults to `--color-mode bpm` so the original cover behavior remains available by default.
+- Existing genre tags are preserved unless `--overwrite-genre` is used.
+- Lower `--final-gain` or use `--no-denoise` if a specific song needs a more transparent sound.
+
+>**Author of project: Zeynalov U.R.o.**

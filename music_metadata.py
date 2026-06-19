@@ -264,6 +264,27 @@ def estimate_genre(audio_path, allowed_genres):
     return choose_allowed_genre(canonical, allowed_genres)
 
 
+def read_existing_genre(audio_path):
+    command = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format_tags=genre",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(audio_path),
+    ]
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+    if result.returncode != 0:
+        return ""
+    for line in result.stdout.splitlines():
+        value = line.strip()
+        if value:
+            return value
+    return ""
+
+
 def write_metadata(audio_path, title, genre, dry_run=False):
     audio_path = Path(audio_path)
     temp_path = audio_path.with_name(f"{audio_path.stem}.metadata_tmp{audio_path.suffix}")
@@ -344,7 +365,7 @@ def choose_genre_interactively(audio_path, allowed_genres, suggested_genre):
         return answer
 
 
-def update_music_metadata(source, genres=None, genres_file=None, dry_run=False, manual=False, select=False, genre_override=None):
+def update_music_metadata(source, genres=None, genres_file=None, dry_run=False, manual=False, select=False, genre_override=None, overwrite_genre=False):
     source_path = Path(source).resolve()
     files = audio_files(source_path)
     allowed_genres = load_genres(genres, genres_file)
@@ -364,15 +385,21 @@ def update_music_metadata(source, genres=None, genres_file=None, dry_run=False, 
     print(f"Allowed genres: {', '.join(allowed_genres)}")
     for index, audio_path in enumerate(files, start=1):
         title = clean_stem(audio_path)
-        suggested_genre = estimate_genre(audio_path, allowed_genres)
-        if genre_override:
-            genre = genre_override
-        elif manual:
-            genre = choose_genre_interactively(audio_path, allowed_genres, suggested_genre)
+        existing_genre = read_existing_genre(audio_path)
+        if existing_genre and not overwrite_genre:
+            genre = existing_genre
+            action = "keep existing genre"
         else:
-            genre = suggested_genre
+            suggested_genre = estimate_genre(audio_path, allowed_genres)
+            if genre_override:
+                genre = genre_override
+            elif manual:
+                genre = choose_genre_interactively(audio_path, allowed_genres, suggested_genre)
+            else:
+                genre = suggested_genre
+            action = "write genre" if not existing_genre else "overwrite genre"
 
-        print(f"[{index}/{len(files)}] Metadata: {audio_path.name} -> title={title!r}, genre={genre!r}, album='', artist=''")
+        print(f"[{index}/{len(files)}] Metadata: {audio_path.name} -> title={title!r}, genre={genre!r}, album='', artist='' ({action})")
         write_metadata(audio_path, title, genre, dry_run=dry_run)
 
     print("Metadata update finished.")
@@ -387,6 +414,7 @@ def main():
     parser.add_argument("--manual", action="store_true", help="Ask which genre to write for each song.")
     parser.add_argument("--select", action="store_true", help="Choose song numbers from the source folder before writing metadata.")
     parser.add_argument("--dry-run", action="store_true", help="Show changes without modifying audio files.")
+    parser.add_argument("--overwrite-genre", action="store_true", help="Replace an existing genre tag. Without this, existing genre is preserved.")
     args = parser.parse_args()
 
     require_ffmpeg()
@@ -398,6 +426,7 @@ def main():
         manual=args.manual,
         select=args.select,
         genre_override=args.genre,
+        overwrite_genre=args.overwrite_genre,
     )
 
 
