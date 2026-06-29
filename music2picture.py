@@ -12,6 +12,7 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
 AUDIO_EXTENSIONS = {".mp3", ".flac", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".wma"}
 COLOR_MODES = {"ocean", "plasma", "fusion", "aurora"}
+SUBPROCESS_STARTUP_KWARGS = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
 COLOR_MODE_LABELS = {
     "ocean": "Ocean",
     "plasma": "Plasma",
@@ -50,7 +51,14 @@ def require_ffmpeg():
 
 
 def run(command):
-    subprocess.run(command, check=True, text=True, encoding="utf-8", errors="replace")
+    subprocess.run(
+        command,
+        check=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        **SUBPROCESS_STARTUP_KWARGS,
+    )
 
 
 def audio_files(source):
@@ -92,7 +100,15 @@ def loudnorm_stats(audio_path, integrated_lufs, true_peak, lra):
         "null",
         "NUL",
     ]
-    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+    result = subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        **SUBPROCESS_STARTUP_KWARGS,
+    )
     text = result.stderr
     start = text.find("{")
     end = text.rfind("}")
@@ -183,7 +199,7 @@ def read_audio(audio_path, sample_rate=22050):
         "f32le",
         "pipe:1",
     ]
-    raw = subprocess.check_output(command)
+    raw = subprocess.check_output(command, **SUBPROCESS_STARTUP_KWARGS)
     data = np.frombuffer(raw, dtype=np.float32)
     if data.size == 0:
         raise RuntimeError(f"No audio data decoded from {audio_path}")

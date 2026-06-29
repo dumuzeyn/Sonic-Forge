@@ -7,6 +7,7 @@ from pathlib import Path
 
 
 AUDIO_EXTENSIONS = {".mp3", ".flac", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".wma"}
+SUBPROCESS_STARTUP_KWARGS = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
 
 
 def default_music_folder():
@@ -21,7 +22,15 @@ def require_ffmpeg():
 
 
 def run(command, **kwargs):
-    return subprocess.run(command, check=True, text=True, encoding="utf-8", errors="replace", **kwargs)
+    return subprocess.run(
+        command,
+        check=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        **SUBPROCESS_STARTUP_KWARGS,
+        **kwargs,
+    )
 
 
 def audio_files(source_root):
@@ -64,6 +73,7 @@ def loudnorm_stats(audio_path, integrated_lufs, true_peak, lra):
         text=True,
         encoding="utf-8",
         errors="replace",
+        **SUBPROCESS_STARTUP_KWARGS,
     )
 
     text = result.stderr

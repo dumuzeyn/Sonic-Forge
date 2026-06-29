@@ -8,6 +8,7 @@ import numpy as np
 
 
 AUDIO_EXTENSIONS = {".mp3", ".flac", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".wma"}
+SUBPROCESS_STARTUP_KWARGS = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
 
 DEFAULT_GENRES = [
     "Pop",
@@ -60,7 +61,14 @@ def require_ffmpeg():
 
 
 def run(command):
-    subprocess.run(command, check=True, text=True, encoding="utf-8", errors="replace")
+    subprocess.run(
+        command,
+        check=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        **SUBPROCESS_STARTUP_KWARGS,
+    )
 
 
 def audio_files(source):
@@ -120,7 +128,7 @@ def read_audio(audio_path, sample_rate=22050):
         "f32le",
         "pipe:1",
     ]
-    raw = subprocess.check_output(command)
+    raw = subprocess.check_output(command, **SUBPROCESS_STARTUP_KWARGS)
     data = np.frombuffer(raw, dtype=np.float32)
     if data.size == 0:
         raise RuntimeError(f"No audio data decoded from {audio_path}")
@@ -275,7 +283,15 @@ def read_existing_genre(audio_path):
         "default=noprint_wrappers=1:nokey=1",
         str(audio_path),
     ]
-    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+    result = subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        **SUBPROCESS_STARTUP_KWARGS,
+    )
     if result.returncode != 0:
         return ""
     for line in result.stdout.splitlines():
