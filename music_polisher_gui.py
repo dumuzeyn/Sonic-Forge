@@ -359,8 +359,8 @@ class SonicForgeApp(tk.Tk):
         return I18N[self.language][key]
 
     def _configure_window(self):
-        self.geometry("1120x860")
-        self.minsize(1020, 800)
+        self.geometry("1280x920")
+        self.minsize(1180, 860)
         self.configure(bg=COLORS["bg"])
         icon_path = resource_path("assets/sonic_forge_mark.ico")
         png_path = resource_path("assets/sonic_forge_mark.png")
