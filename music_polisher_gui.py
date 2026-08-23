@@ -1,5 +1,5 @@
-import queue
 import os
+import queue
 import sys
 import threading
 import traceback
@@ -8,170 +8,21 @@ import tkinter.font as tkfont
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+import psutil
+from PIL import Image, ImageTk
+
 import easy_music_process
-import music2picture
+import music_metadata
+from ui.dialogs import AdditionalMetadataDialog, AdvancedAudioDialog
+from ui.i18n import APP_NAMES, I18N
+from ui.layout import SonicForgeView
+from ui.theme import COLORS, FONTS, configure_styles
 
 
-APP_NAMES = {
-    "ru": "Кузница Звука",
-    "en": "Sonic Forge",
-}
-
-I18N = {
-    "ru": {
-        "language_button": "English",
-        "description": "Приложение подготавливает музыкальные файлы: нормализует громкость, записывает метаданные, создает обложку и переносит готовый результат в выбранную папку только после полного завершения обработки.",
-        "source": "Источник",
-        "output": "Папка назначения",
-        "genre": "Жанр",
-        "artist": "Исполнитель",
-        "album": "Альбом",
-        "album_artist": "Исполнитель альбома",
-        "composer": "Композитор",
-        "date": "Год",
-        "track": "Номер трека",
-        "comment": "Комментарий",
-        "overwrite_genre": "Заменить существующий жанр",
-        "color_mode": "Цветовая схема",
-        "seed": "Seed",
-        "metadata": "Метаданные",
-        "audio": "Звук",
-        "integrated_lufs": "Средняя громкость LUFS",
-        "true_peak": "Пиковый предел",
-        "lra": "Диапазон громкости",
-        "final_gain": "Финальное усиление",
-        "denoise": "Шумоподавление",
-        "denoise_strength": "Сила шумоподавления",
-        "limiter": "Лимитер",
-        "cover": "Обложка",
-        "cover_size": "Размер",
-        "cover_patterns": "Детализация",
-        "center_title": "Название по центру",
-        "embed_cover": "Встроить обложку",
-        "no_change_cover": "Не менять обложку",
-        "choose_file": "Файл",
-        "choose_folder": "Папка",
-        "run": "Запустить",
-        "clear_log": "Очистить журнал",
-        "log_ready": "Готов к работе.",
-        "run_started": "Запуск обработки.",
-        "run_finished": "Обработка завершена.",
-        "error": "Ошибка",
-        "missing_paths": "Выберите источник и папку назначения.",
-        "bad_seed": "Seed должен быть целым числом или пустым полем.",
-        "source_dialog_file": "Выберите аудиофайл",
-        "source_dialog_folder": "Выберите папку с музыкой",
-        "output_dialog_folder": "Выберите папку назначения",
-        "tip_source": "Один аудиофайл или папка с несколькими песнями.",
-        "tip_output": "Папка, куда будут перенесены готовые файлы. Во время обработки она не изменяется.",
-        "tip_genre": "Жанр, который будет записан в метаданные. Если поле пустое, программа попробует определить жанр автоматически.",
-        "tip_artist": "Имя исполнителя. Если поле пустое, исполнитель останется пустым.",
-        "tip_album": "Название альбома. Если поле пустое, альбом останется пустым.",
-        "tip_album_artist": "Исполнитель альбома. Если поле пустое, это поле останется пустым.",
-        "tip_composer": "Композитор или автор музыки. Если поле пустое, это поле останется пустым.",
-        "tip_date": "Год или дата выпуска. Если поле пустое, дата останется пустой.",
-        "tip_track": "Номер трека, например 1 или 1/12. Если поле пустое, номер трека останется пустым.",
-        "tip_comment": "Комментарий к файлу. Если поле пустое, комментарий останется пустым.",
-        "tip_overwrite_genre": "Если включено, выбранный жанр заменит жанр, который уже записан в файле.",
-        "tip_color_mode": "Схема цветов для обложки. Доступны только четыре официальных режима: ocean, plasma, fusion, aurora.",
-        "tip_seed": "Целое число для повторяемой генерации обложек. Оставьте пустым, чтобы обложки каждый раз отличались.",
-        "tip_integrated_lufs": "Целевая средняя громкость трека. Значение -14 LUFS обычно дает громкий, но умеренный результат.",
-        "tip_true_peak": "Максимальный пик громкости после обработки. Отрицательное значение снижает риск перегруза.",
-        "tip_lra": "Желаемый диапазон громкости. Меньше значение делает громкость ровнее, больше сохраняет динамику.",
-        "tip_final_gain": "Дополнительное усиление после нормализации. Слишком высокое значение может добавить резкость.",
-        "tip_denoise": "Мягко снижает фоновый шум перед нормализацией. Если песня теряет детали, отключите параметр.",
-        "tip_denoise_strength": "Сила шумоподавления. Умеренные значения обычно безопаснее для качества музыки.",
-        "tip_limiter": "Ограничивает финальные пики, чтобы уменьшить вероятность искажений.",
-        "tip_cover_size": "Размер создаваемой обложки в пикселях. 1000 подходит для большинства MP3-файлов.",
-        "tip_cover_patterns": "Сложность рисунка обложки: 1 проще, 2 детальнее.",
-        "tip_center_title": "Добавляет название песни в центр обложки.",
-        "tip_embed_cover": "Встраивает созданную обложку непосредственно в MP3-файл.",
-        "tip_no_change_cover": "Если включено, приложение не будет создавать и встраивать новую обложку.",
-    },
-    "en": {
-        "language_button": "Русский",
-        "description": "The application prepares music files by normalizing loudness, writing metadata, generating cover art, and publishing the finished result to the selected folder only after the full process succeeds.",
-        "source": "Source",
-        "output": "Output folder",
-        "genre": "Genre",
-        "artist": "Artist",
-        "album": "Album",
-        "album_artist": "Album artist",
-        "composer": "Composer",
-        "date": "Year",
-        "track": "Track",
-        "comment": "Comment",
-        "overwrite_genre": "Overwrite existing genre",
-        "color_mode": "Color mode",
-        "seed": "Seed",
-        "metadata": "Metadata",
-        "audio": "Audio",
-        "integrated_lufs": "Integrated LUFS",
-        "true_peak": "True peak",
-        "lra": "Loudness range",
-        "final_gain": "Final gain",
-        "denoise": "Denoise",
-        "denoise_strength": "Denoise strength",
-        "limiter": "Limiter",
-        "cover": "Cover",
-        "cover_size": "Size",
-        "cover_patterns": "Patterns",
-        "center_title": "Center title",
-        "embed_cover": "Embed cover",
-        "no_change_cover": "Do not change cover",
-        "choose_file": "File",
-        "choose_folder": "Folder",
-        "run": "Run",
-        "clear_log": "Clear log",
-        "log_ready": "Ready.",
-        "run_started": "Processing started.",
-        "run_finished": "Processing finished.",
-        "error": "Error",
-        "missing_paths": "Choose source and output paths.",
-        "bad_seed": "Seed must be an integer or empty.",
-        "source_dialog_file": "Choose audio file",
-        "source_dialog_folder": "Choose source folder",
-        "output_dialog_folder": "Choose output folder",
-        "tip_source": "A single audio file or a folder containing several songs.",
-        "tip_output": "The folder that will receive finished files. It is not changed while processing is still running.",
-        "tip_genre": "Genre written to metadata. Leave it empty to let the application estimate the genre automatically.",
-        "tip_artist": "Artist name. Leave empty to keep this field empty.",
-        "tip_album": "Album title. Leave empty to keep this field empty.",
-        "tip_album_artist": "Album artist. Leave empty to keep this field empty.",
-        "tip_composer": "Composer or music author. Leave empty to keep this field empty.",
-        "tip_date": "Release year or date. Leave empty to keep this field empty.",
-        "tip_track": "Track number, for example 1 or 1/12. Leave empty to keep this field empty.",
-        "tip_comment": "File comment. Leave empty to keep this field empty.",
-        "tip_overwrite_genre": "When enabled, the selected genre replaces the genre already stored in the file.",
-        "tip_color_mode": "Cover color scheme. Only four official modes are available: ocean, plasma, fusion, aurora.",
-        "tip_seed": "Integer for repeatable cover generation. Leave empty to generate a different cover each time.",
-        "tip_integrated_lufs": "Target average loudness. -14 LUFS usually gives a loud but moderate result.",
-        "tip_true_peak": "Maximum loudness peak after processing. A negative value reduces clipping risk.",
-        "tip_lra": "Target loudness range. Lower values sound more even; higher values preserve more dynamics.",
-        "tip_final_gain": "Extra gain after normalization. Too much gain can make the result harsh.",
-        "tip_denoise": "Gently reduces background noise before normalization. Disable it if a song loses detail.",
-        "tip_denoise_strength": "Denoise amount. Moderate values are usually safer for music quality.",
-        "tip_limiter": "Limits final peaks to reduce the chance of distortion.",
-        "tip_cover_size": "Generated cover size in pixels. 1000 is suitable for most MP3 files.",
-        "tip_cover_patterns": "Cover pattern complexity: 1 is simpler, 2 is more detailed.",
-        "tip_center_title": "Adds the song title to the center of the cover.",
-        "tip_embed_cover": "Embeds the generated cover directly into the MP3 file.",
-        "tip_no_change_cover": "When enabled, the application does not create or embed new cover art.",
-    },
-}
-
-COLORS = {
-    "bg": "#0d0d12",
-    "panel": "#15151e",
-    "field": "#20202b",
-    "border": "#393447",
-    "text": "#f4f1ff",
-    "muted": "#bbb4cc",
-    "accent": "#8d5cff",
-    "accent_hot": "#b486ff",
-    "button": "#2a2140",
-    "button_active": "#3a2b61",
-}
+AUDIO_FILE_TYPES = [
+    ("Audio files", "*.mp3 *.flac *.wav *.m4a *.aac *.ogg *.opus *.wma"),
+    ("All files", "*.*"),
+]
 
 
 def resource_path(relative_path):
@@ -211,118 +62,32 @@ class QueueWriter:
         pass
 
 
-class ToolTip:
-    def __init__(self, widget, app, tip_key):
-        self.widget = widget
-        self.app = app
-        self.tip_key = tip_key
-        self.window = None
-        self.after_id = None
-        widget.bind("<Enter>", self._schedule)
-        widget.bind("<Leave>", self._hide)
-        widget.bind("<ButtonPress>", self._hide)
-
-    def _schedule(self, _event=None):
-        self._cancel()
-        self.after_id = self.widget.after(450, self._show)
-
-    def _cancel(self):
-        if self.after_id is not None:
-            self.widget.after_cancel(self.after_id)
-            self.after_id = None
-
-    def _show(self):
-        text = self.app.t(self.tip_key)
-        if self.window is not None or not text:
-            return
-        x = self.widget.winfo_rootx() + 12
-        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 8
-        self.window = tk.Toplevel(self.widget)
-        self.window.wm_overrideredirect(True)
-        self.window.wm_geometry(f"+{x}+{y}")
-        label = tk.Label(
-            self.window,
-            text=text,
-            justify="left",
-            background="#1f1b2d",
-            foreground=COLORS["text"],
-            relief="solid",
-            borderwidth=1,
-            padx=10,
-            pady=8,
-            wraplength=390,
-            font=("Segoe UI", 10),
-        )
-        label.pack()
-
-    def _hide(self, _event=None):
-        self._cancel()
-        if self.window is not None:
-            self.window.destroy()
-            self.window = None
-
-
-class SquareCheckbutton(tk.Frame):
-    def __init__(self, parent, variable, text="", command=None):
-        super().__init__(parent, bg=COLORS["bg"])
-        self.variable = variable
-        self.command = command
-        self.canvas = tk.Canvas(
-            self,
-            width=18,
-            height=18,
-            bg=COLORS["bg"],
-            highlightthickness=0,
-            bd=0,
-        )
-        self.label = tk.Label(
-            self,
-            text=text,
-            bg=COLORS["bg"],
-            fg=COLORS["text"],
-            font=("Segoe UI", 10),
-        )
-        self.canvas.pack(side=tk.LEFT, padx=(0, 7))
-        self.label.pack(side=tk.LEFT)
-        self.canvas.bind("<Button-1>", self._toggle)
-        self.label.bind("<Button-1>", self._toggle)
-        self.bind("<Button-1>", self._toggle)
-        self.variable.trace_add("write", self._redraw)
-        self._redraw()
-
-    def configure(self, cnf=None, **kwargs):
-        text = kwargs.pop("text", None)
-        if text is not None:
-            self.label.configure(text=text)
-        if kwargs:
-            super().configure(cnf, **kwargs)
-
-    config = configure
-
-    def _toggle(self, _event=None):
-        self.variable.set(not bool(self.variable.get()))
-        if self.command:
-            self.command()
-
-    def _redraw(self, *_args):
-        selected = bool(self.variable.get())
-        self.canvas.delete("all")
-        border = COLORS["accent_hot"] if selected else COLORS["border"]
-        fill = COLORS["accent"] if selected else COLORS["field"]
-        self.canvas.create_rectangle(2, 2, 16, 16, outline=border, fill=fill, width=2)
-
-
 class SonicForgeApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.language = "ru"
         self.log_queue = queue.Queue()
         self.worker = None
-        self.localized_widgets = []
-        self.frame_titles = []
+        self.cancel_event = threading.Event()
+        self.advanced_dialog = None
+        self.metadata_dialog = None
+        self._undo_history = {}
+        self._create_variables()
+        self._configure_window()
+        self.style = configure_styles(self)
+        self._configure_fonts()
+        self.header_image = self._load_header_image()
+        self.view = SonicForgeView(self, self, self.header_image)
+        self.view.update_dependencies()
+        self._bind_shortcuts()
+        self.write_log(self.t("log_ready") + "\n")
+        self._log_after_id = self.after(100, self._drain_log_queue)
+        self.protocol("WM_DELETE_WINDOW", self._close)
 
+    def _create_variables(self):
         self.source_var = tk.StringVar()
         self.output_var = tk.StringVar()
+        self.title_var = tk.StringVar()
         self.genre_var = tk.StringVar()
         self.artist_var = tk.StringVar()
         self.album_var = tk.StringVar()
@@ -330,9 +95,14 @@ class SonicForgeApp(tk.Tk):
         self.composer_var = tk.StringVar()
         self.date_var = tk.StringVar()
         self.track_var = tk.StringVar()
+        self.disc_var = tk.StringVar()
         self.comment_var = tk.StringVar()
-        self.color_var = tk.StringVar(value="plasma")
-        self.seed_var = tk.StringVar()
+        self.publisher_var = tk.StringVar()
+        self.copyright_var = tk.StringVar()
+        self.lyrics_var = tk.StringVar()
+        self.overwrite_genre_var = tk.BooleanVar(value=False)
+        self.overwrite_all_metadata_var = tk.BooleanVar(value=False)
+
         self.integrated_lufs_var = tk.DoubleVar(value=-14.0)
         self.true_peak_var = tk.DoubleVar(value=-1.5)
         self.lra_var = tk.DoubleVar(value=11.0)
@@ -340,335 +110,167 @@ class SonicForgeApp(tk.Tk):
         self.denoise_var = tk.BooleanVar(value=True)
         self.denoise_strength_var = tk.DoubleVar(value=4.0)
         self.limiter_var = tk.BooleanVar(value=True)
-        self.overwrite_genre_var = tk.BooleanVar(value=False)
+        self.bass_gain_var = tk.DoubleVar(value=0.0)
+        self.mid_gain_var = tk.DoubleVar(value=0.0)
+        self.treble_gain_var = tk.DoubleVar(value=0.0)
+        self.highpass_hz_var = tk.DoubleVar(value=20.0)
+        self.lowpass_hz_var = tk.DoubleVar(value=20000.0)
+        self.stereo_width_var = tk.DoubleVar(value=1.0)
+        self.compressor_var = tk.BooleanVar(value=False)
+        self.compressor_threshold_var = tk.DoubleVar(value=-18.0)
+        self.compressor_ratio_var = tk.DoubleVar(value=3.0)
+        self.compressor_attack_var = tk.DoubleVar(value=20.0)
+        self.compressor_release_var = tk.DoubleVar(value=250.0)
+        self.compressor_makeup_var = tk.DoubleVar(value=0.0)
+        self.pitch_semitones_var = tk.DoubleVar(value=0.0)
+        self.playback_speed_var = tk.DoubleVar(value=1.0)
+        self.reverb_mix_var = tk.DoubleVar(value=0.0)
+        self.fade_in_var = tk.DoubleVar(value=0.0)
+        self.fade_out_var = tk.DoubleVar(value=0.0)
+
+        self.color_var = tk.StringVar(value="plasma")
+        self.seed_var = tk.StringVar()
         self.cover_size_var = tk.IntVar(value=1000)
         self.cover_patterns_var = tk.IntVar(value=2)
         self.center_title_var = tk.BooleanVar(value=True)
         self.embed_cover_var = tk.BooleanVar(value=True)
         self.no_change_cover_var = tk.BooleanVar(value=False)
-
-        self._configure_window()
-        self._configure_fonts()
-        self._configure_style()
-        self._bind_edit_shortcuts()
-        self._build_ui()
-        self._apply_language()
-        self.after(100, self._drain_log_queue)
-
-    def t(self, key):
-        return I18N[self.language][key]
+        self.process_metadata_var = tk.BooleanVar(value=True)
+        self.process_audio_var = tk.BooleanVar(value=True)
+        self.process_cover_var = tk.BooleanVar(value=True)
 
     def _configure_window(self):
+        self.title(self.app_name())
         self.geometry("1280x920")
         self.minsize(1180, 860)
         self.configure(bg=COLORS["bg"])
         icon_path = resource_path("assets/sonic_forge_mark.ico")
-        png_path = resource_path("assets/sonic_forge_mark.png")
         if icon_path.exists():
             try:
                 self.iconbitmap(str(icon_path))
             except tk.TclError:
                 pass
-        if png_path.exists():
-            try:
-                self.icon_image = tk.PhotoImage(file=str(png_path))
-                self.iconphoto(True, self.icon_image)
-            except tk.TclError:
-                self.icon_image = None
 
     def _configure_fonts(self):
         for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont"):
-            font = tkfont.nametofont(name)
-            font.configure(family="Segoe UI", size=max(font.cget("size"), 10))
-        tkfont.nametofont("TkHeadingFont").configure(family="Segoe UI", size=11, weight="bold")
+            tkfont.nametofont(name).configure(family="Segoe UI", size=10)
+        tkfont.nametofont("TkHeadingFont").configure(family="Segoe UI Semibold", size=11)
+        self.option_add("*TCombobox*Listbox.background", COLORS["elevated"])
+        self.option_add("*TCombobox*Listbox.foreground", COLORS["text"])
+        self.option_add("*TCombobox*Listbox.selectBackground", COLORS["accent"])
+        self.option_add("*TCombobox*Listbox.font", FONTS["body"])
 
-    def _configure_style(self):
-        self.style = ttk.Style(self)
-        self.style.theme_use("clam")
-        self.style.configure(".", background=COLORS["bg"], foreground=COLORS["text"], fieldbackground=COLORS["field"], bordercolor=COLORS["border"], lightcolor=COLORS["border"], darkcolor=COLORS["border"])
-        self.style.configure("TFrame", background=COLORS["bg"])
-        self.style.configure("Panel.TFrame", background=COLORS["panel"])
-        self.style.configure("TLabel", background=COLORS["bg"], foreground=COLORS["text"])
-        self.style.configure("Muted.TLabel", background=COLORS["bg"], foreground=COLORS["muted"])
-        self.style.configure("Title.TLabel", background=COLORS["bg"], foreground=COLORS["text"], font=("Segoe UI", 20, "bold"))
-        self.style.configure("TLabelframe", background=COLORS["bg"], foreground=COLORS["text"], bordercolor=COLORS["border"])
-        self.style.configure("TLabelframe.Label", background=COLORS["bg"], foreground=COLORS["accent_hot"], font=("Segoe UI", 11, "bold"))
-        self.style.configure("TButton", background=COLORS["button"], foreground=COLORS["text"], borderwidth=1, focusthickness=1, focuscolor=COLORS["accent"], padding=(12, 7))
-        self.style.map("TButton", background=[("active", COLORS["button_active"]), ("pressed", COLORS["accent"])])
-        self.style.configure("Accent.TButton", background=COLORS["accent"], foreground="#ffffff", font=("Segoe UI", 10, "bold"))
-        self.style.map("Accent.TButton", background=[("active", COLORS["accent_hot"]), ("pressed", "#6f45d8")])
-        self.style.configure("TEntry", fieldbackground=COLORS["field"], foreground=COLORS["text"], insertcolor=COLORS["text"], bordercolor=COLORS["border"], padding=5)
-        self.style.configure("TSpinbox", fieldbackground=COLORS["field"], foreground=COLORS["text"], insertcolor=COLORS["text"], bordercolor=COLORS["border"], padding=5)
-        self.style.configure("TCombobox", fieldbackground=COLORS["field"], foreground=COLORS["text"], arrowcolor=COLORS["accent"], bordercolor=COLORS["border"], padding=5)
-        self.style.map("TCombobox", fieldbackground=[("readonly", COLORS["field"])], foreground=[("readonly", COLORS["text"])])
-        self.style.configure("TCheckbutton", background=COLORS["bg"], foreground=COLORS["text"], indicatorcolor=COLORS["field"], indicatormargin=6, indicatordiameter=16)
-        self.style.map(
-            "TCheckbutton",
-            background=[("active", COLORS["bg"])],
-            foreground=[("active", COLORS["text"])],
-            indicatorcolor=[("selected", COLORS["accent"]), ("!selected", COLORS["field"])],
-        )
-        self.style.configure("Horizontal.TProgressbar", background=COLORS["accent"], troughcolor=COLORS["field"], bordercolor=COLORS["border"])
+    def _load_header_image(self):
+        path = resource_path("assets/sonic_forge_mark.png")
+        image = Image.open(path).convert("RGBA").resize((48, 48), Image.Resampling.LANCZOS)
+        return ImageTk.PhotoImage(image)
 
-    def _bind_edit_shortcuts(self):
-        bindings = {
-            "<Control-a>": self._select_all,
-            "<Control-A>": self._select_all,
-            "<Control-c>": self._copy,
-            "<Control-C>": self._copy,
-            "<Control-x>": self._cut,
-            "<Control-X>": self._cut,
-            "<Control-v>": self._paste,
-            "<Control-V>": self._paste,
-            "<Control-z>": self._undo,
-            "<Control-Z>": self._undo,
-            "<Shift-Insert>": self._paste,
-        }
-        for sequence, handler in bindings.items():
-            self.bind_all(sequence, handler, add="+")
-        self.bind_all("<Control-KeyPress>", self._keycode_fallback, add="+")
+    def app_name(self):
+        return APP_NAMES[self.language]
 
-    def _keycode_fallback(self, event):
-        keycode_map = {
-            65: self._select_all,
-            67: self._copy,
-            86: self._paste,
-            88: self._cut,
-            90: self._undo,
-        }
-        handler = keycode_map.get(event.keycode)
-        if handler:
-            return handler(event)
-        return None
+    def t(self, key):
+        return I18N[self.language].get(key, key)
 
-    def _focused_edit_widget(self):
-        widget = self.focus_get()
-        if widget is None:
-            return None
-        classes = {"Entry", "TEntry", "Spinbox", "TSpinbox", "Text", "TCombobox"}
-        if widget.winfo_class() in classes:
-            return widget
-        return None
-
-    def _select_all(self, _event=None):
-        widget = self._focused_edit_widget()
-        if widget is None:
-            return None
-        try:
-            if widget.winfo_class() == "Text":
-                widget.tag_add("sel", "1.0", "end-1c")
-            else:
-                widget.selection_range(0, tk.END)
-                widget.icursor(tk.END)
-            return "break"
-        except tk.TclError:
-            return None
-
-    def _copy(self, _event=None):
-        return self._generate_edit_event("<<Copy>>")
-
-    def _cut(self, _event=None):
-        return self._generate_edit_event("<<Cut>>")
-
-    def _paste(self, _event=None):
-        return self._generate_edit_event("<<Paste>>")
-
-    def _undo(self, _event=None):
-        return self._generate_edit_event("<<Undo>>")
-
-    def _generate_edit_event(self, event_name):
-        widget = self._focused_edit_widget()
-        if widget is None:
-            return None
-        try:
-            widget.event_generate(event_name)
-            return "break"
-        except tk.TclError:
-            return None
-
-    def _localized(self, widget, key):
-        self.localized_widgets.append((widget, key))
-        return widget
-
-    def _with_tip(self, widget, tip_key):
-        ToolTip(widget, self, tip_key)
-        return widget
-
-    def _label(self, parent, key, tip_key=None, style=None):
-        label = self._localized(ttk.Label(parent, style=style), key)
-        if tip_key:
-            self._with_tip(label, tip_key)
-        return label
-
-    def _button(self, parent, key, command, style=None):
-        return self._localized(ttk.Button(parent, command=command, style=style), key)
-
-    def _checkbutton(self, parent, key, variable, tip_key):
-        widget = self._localized(SquareCheckbutton(parent, variable=variable), key)
-        return self._with_tip(widget, tip_key)
-
-    def _frame_title(self, frame, key):
-        self.frame_titles.append((frame, key))
-        return frame
-
-    def _build_ui(self):
-        root = ttk.Frame(self, padding=18)
-        root.pack(fill=tk.BOTH, expand=True)
-        root.columnconfigure(1, weight=1)
-        root.rowconfigure(10, weight=1)
-
-        header = ttk.Frame(root)
-        header.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 16))
-        header.columnconfigure(1, weight=1)
-        self.title_label = ttk.Label(header, style="Title.TLabel")
-        self.title_label.grid(row=0, column=1, sticky="w")
-        self.description_label = self._localized(ttk.Label(header, style="Muted.TLabel", wraplength=690, justify="left"), "description")
-        self.description_label.grid(row=1, column=1, sticky="w", pady=(4, 0))
-        self.language_button = self._button(header, "language_button", self._toggle_language)
-        self.language_button.grid(row=0, column=2, sticky="ne")
-
-        self._label(root, "source", "tip_source").grid(row=1, column=0, sticky="w", pady=5)
-        self.source_entry = ttk.Entry(root, textvariable=self.source_var)
-        self.source_entry.grid(row=1, column=1, sticky="ew", padx=10, pady=5)
-        source_buttons = ttk.Frame(root)
-        source_buttons.grid(row=1, column=2, sticky="e", pady=5)
-        self._button(source_buttons, "choose_file", self._choose_source_file).pack(side=tk.LEFT, padx=(0, 6))
-        self._button(source_buttons, "choose_folder", self._choose_source_folder).pack(side=tk.LEFT)
-
-        self._label(root, "output", "tip_output").grid(row=2, column=0, sticky="w", pady=5)
-        ttk.Entry(root, textvariable=self.output_var).grid(row=2, column=1, sticky="ew", padx=10, pady=5)
-        self._button(root, "choose_folder", self._choose_output_folder).grid(row=2, column=2, sticky="e", pady=5)
-
-        metadata_box = self._frame_title(ttk.LabelFrame(root), "metadata")
-        metadata_box.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(12, 8))
-        for col in range(6):
-            metadata_box.columnconfigure(col, weight=1 if col in {1, 3, 5} else 0)
-        self._label(metadata_box, "genre", "tip_genre").grid(row=0, column=0, sticky="w", padx=10, pady=6)
-        ttk.Entry(metadata_box, textvariable=self.genre_var, width=16).grid(row=0, column=1, sticky="ew", padx=8, pady=6)
-        self._label(metadata_box, "artist", "tip_artist").grid(row=0, column=2, sticky="w", padx=10, pady=6)
-        ttk.Entry(metadata_box, textvariable=self.artist_var, width=18).grid(row=0, column=3, sticky="ew", padx=8, pady=6)
-        self._label(metadata_box, "album", "tip_album").grid(row=0, column=4, sticky="w", padx=10, pady=6)
-        ttk.Entry(metadata_box, textvariable=self.album_var, width=18).grid(row=0, column=5, sticky="ew", padx=8, pady=6)
-        self._label(metadata_box, "album_artist", "tip_album_artist").grid(row=1, column=0, sticky="w", padx=10, pady=6)
-        ttk.Entry(metadata_box, textvariable=self.album_artist_var, width=16).grid(row=1, column=1, sticky="ew", padx=8, pady=6)
-        self._label(metadata_box, "composer", "tip_composer").grid(row=1, column=2, sticky="w", padx=10, pady=6)
-        ttk.Entry(metadata_box, textvariable=self.composer_var, width=18).grid(row=1, column=3, sticky="ew", padx=8, pady=6)
-        self._label(metadata_box, "date", "tip_date").grid(row=1, column=4, sticky="w", padx=10, pady=6)
-        ttk.Entry(metadata_box, textvariable=self.date_var, width=18).grid(row=1, column=5, sticky="ew", padx=8, pady=6)
-        self._label(metadata_box, "track", "tip_track").grid(row=2, column=0, sticky="w", padx=10, pady=6)
-        ttk.Entry(metadata_box, textvariable=self.track_var, width=16).grid(row=2, column=1, sticky="ew", padx=8, pady=6)
-        self._label(metadata_box, "comment", "tip_comment").grid(row=2, column=2, sticky="w", padx=10, pady=6)
-        ttk.Entry(metadata_box, textvariable=self.comment_var, width=18).grid(row=2, column=3, columnspan=2, sticky="ew", padx=8, pady=6)
-        self._checkbutton(metadata_box, "overwrite_genre", self.overwrite_genre_var, "tip_overwrite_genre").grid(row=2, column=5, sticky="w", padx=10, pady=6)
-
-        self._label(root, "color_mode", "tip_color_mode").grid(row=4, column=0, sticky="w", pady=5)
-        color_values = sorted(music2picture.COLOR_MODES)
-        ttk.Combobox(root, textvariable=self.color_var, values=color_values, state="readonly").grid(row=4, column=1, sticky="ew", padx=10, pady=5)
-        seed_box = ttk.Frame(root)
-        seed_box.grid(row=4, column=2, sticky="e", pady=5)
-        self._label(seed_box, "seed", "tip_seed").pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Entry(seed_box, textvariable=self.seed_var, width=12).pack(side=tk.LEFT)
-
-        audio_box = self._frame_title(ttk.LabelFrame(root), "audio")
-        audio_box.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(8, 8))
-        for col in range(6):
-            audio_box.columnconfigure(col, weight=1 if col in {1, 3, 5} else 0)
-        self._label(audio_box, "integrated_lufs", "tip_integrated_lufs").grid(row=0, column=0, sticky="w", padx=10, pady=8)
-        ttk.Spinbox(audio_box, from_=-30.0, to=-5.0, increment=0.5, textvariable=self.integrated_lufs_var, width=8).grid(row=0, column=1, sticky="w", padx=8, pady=8)
-        self._label(audio_box, "true_peak", "tip_true_peak").grid(row=0, column=2, sticky="w", padx=10, pady=8)
-        ttk.Spinbox(audio_box, from_=-6.0, to=0.0, increment=0.1, textvariable=self.true_peak_var, width=8).grid(row=0, column=3, sticky="w", padx=8, pady=8)
-        self._label(audio_box, "lra", "tip_lra").grid(row=0, column=4, sticky="w", padx=10, pady=8)
-        ttk.Spinbox(audio_box, from_=1.0, to=30.0, increment=0.5, textvariable=self.lra_var, width=8).grid(row=0, column=5, sticky="w", padx=8, pady=8)
-        self._label(audio_box, "final_gain", "tip_final_gain").grid(row=1, column=0, sticky="w", padx=10, pady=8)
-        ttk.Spinbox(audio_box, from_=0.5, to=2.0, increment=0.05, textvariable=self.final_gain_var, width=8).grid(row=1, column=1, sticky="w", padx=8, pady=8)
-        self._checkbutton(audio_box, "denoise", self.denoise_var, "tip_denoise").grid(row=1, column=2, sticky="w", padx=10, pady=8)
-        self._label(audio_box, "denoise_strength", "tip_denoise_strength").grid(row=1, column=3, sticky="e", padx=8, pady=8)
-        ttk.Spinbox(audio_box, from_=0.0, to=20.0, increment=0.5, textvariable=self.denoise_strength_var, width=8).grid(row=1, column=4, sticky="w", padx=8, pady=8)
-        self._checkbutton(audio_box, "limiter", self.limiter_var, "tip_limiter").grid(row=1, column=5, sticky="w", padx=10, pady=8)
-
-        cover_box = self._frame_title(ttk.LabelFrame(root), "cover")
-        cover_box.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(4, 8))
-        self._label(cover_box, "cover_size", "tip_cover_size").grid(row=0, column=0, sticky="w", padx=10, pady=8)
-        ttk.Spinbox(cover_box, from_=256, to=3000, increment=128, textvariable=self.cover_size_var, width=8).grid(row=0, column=1, sticky="w", padx=8, pady=8)
-        self._label(cover_box, "cover_patterns", "tip_cover_patterns").grid(row=0, column=2, sticky="w", padx=10, pady=8)
-        ttk.Combobox(cover_box, textvariable=self.cover_patterns_var, values=[1, 2], state="readonly", width=6).grid(row=0, column=3, sticky="w", padx=8, pady=8)
-        self._checkbutton(cover_box, "center_title", self.center_title_var, "tip_center_title").grid(row=0, column=4, sticky="w", padx=10, pady=8)
-        self._checkbutton(cover_box, "embed_cover", self.embed_cover_var, "tip_embed_cover").grid(row=0, column=5, sticky="w", padx=10, pady=8)
-        self._checkbutton(cover_box, "no_change_cover", self.no_change_cover_var, "tip_no_change_cover").grid(row=1, column=0, sticky="w", padx=10, pady=8)
-
-        buttons = ttk.Frame(root)
-        buttons.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(8, 12))
-        buttons.columnconfigure(0, weight=1)
-        self.run_button = self._button(buttons, "run", self._run, style="Accent.TButton")
-        self.run_button.grid(row=0, column=1, padx=5)
-        self._button(buttons, "clear_log", self._clear_log).grid(row=0, column=2, padx=5)
-
-        self.progress = ttk.Progressbar(root, mode="indeterminate")
-        self.progress.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(0, 10))
-
-        self.log = tk.Text(root, height=16, wrap="word", undo=True, bg="#0a0a0f", fg=COLORS["text"], insertbackground=COLORS["text"], relief="solid", borderwidth=1, highlightthickness=1, highlightbackground=COLORS["border"], font=("Consolas", 10))
-        self.log.grid(row=10, column=0, columnspan=3, sticky="nsew")
-        scrollbar = ttk.Scrollbar(root, command=self.log.yview)
-        scrollbar.grid(row=10, column=3, sticky="ns")
-        self.log.configure(yscrollcommand=scrollbar.set)
-
-    def _apply_language(self):
-        app_name = APP_NAMES[self.language]
-        self.title(app_name)
-        self.title_label.configure(text=app_name)
-        for widget, key in self.localized_widgets:
-            widget.configure(text=self.t(key))
-        for frame, key in self.frame_titles:
-            frame.configure(text=self.t(key))
-        self.log.delete("1.0", tk.END)
-        self._write_log(self.t("log_ready") + "\n")
-
-    def _toggle_language(self):
+    def toggle_language(self):
         self.language = "en" if self.language == "ru" else "ru"
-        self._apply_language()
+        self.title(self.app_name())
+        self.view.apply_language()
+        if self.advanced_dialog and self.advanced_dialog.winfo_exists():
+            self.advanced_dialog.destroy()
+            self.advanced_dialog = None
 
-    def _choose_source_file(self):
+    def choose_source_file(self):
         path = filedialog.askopenfilename(
-            title=self.t("source_dialog_file"),
-            filetypes=[("Audio files", "*.mp3 *.flac *.wav *.m4a *.aac *.ogg *.opus *.wma"), ("All files", "*.*")],
+            title=self.t("source_dialog_file"), filetypes=AUDIO_FILE_TYPES
         )
         if path:
             self.source_var.set(path)
 
-    def _choose_source_folder(self):
+    def choose_source_folder(self):
         path = filedialog.askdirectory(title=self.t("source_dialog_folder"))
         if path:
             self.source_var.set(path)
 
-    def _choose_output_folder(self):
+    def choose_output_folder(self):
         path = filedialog.askdirectory(title=self.t("output_dialog_folder"))
         if path:
             self.output_var.set(path)
 
-    def _parse_seed(self):
-        seed = self.seed_var.get().strip()
-        if not seed:
-            return None
-        return int(seed)
-
-    def _run(self):
-        if self.worker and self.worker.is_alive():
+    def show_advanced_audio(self):
+        if self.advanced_dialog and self.advanced_dialog.winfo_exists():
+            self.advanced_dialog.focus_force()
             return
+        self.advanced_dialog = AdvancedAudioDialog(self)
 
-        source = self.source_var.get().strip()
-        output = self.output_var.get().strip()
-        if not source or not output:
-            messagebox.showerror(APP_NAMES[self.language], self.t("missing_paths"))
+    def show_additional_metadata(self):
+        if self.metadata_dialog and self.metadata_dialog.winfo_exists():
+            self.metadata_dialog.focus_force()
+            return
+        self.metadata_dialog = AdditionalMetadataDialog(self)
+
+    def load_metadata(self):
+        source = Path(self.source_var.get().strip())
+        if not source.is_file():
+            messagebox.showerror(self.app_name(), self.t("metadata_single_file"))
             return
         try:
-            cover_seed = self._parse_seed()
-        except ValueError:
-            messagebox.showerror(APP_NAMES[self.language], self.t("bad_seed"))
+            tags = music_metadata.read_all_metadata(source)
+        except Exception as exc:
+            messagebox.showerror(self.app_name(), str(exc))
             return
 
-        kwargs = {
-            "source": source,
-            "output": output,
+        def first(*names):
+            return next((tags[name] for name in names if tags.get(name)), "")
+
+        values = {
+            self.title_var: first("title"),
+            self.genre_var: first("genre"),
+            self.artist_var: first("artist"),
+            self.album_var: first("album"),
+            self.album_artist_var: first("album_artist", "albumartist"),
+            self.composer_var: first("composer"),
+            self.date_var: first("date", "year"),
+            self.track_var: first("track", "tracknumber"),
+            self.disc_var: first("disc", "discnumber"),
+            self.comment_var: first("comment", "description"),
+            self.publisher_var: first("publisher", "organization"),
+            self.copyright_var: first("copyright"),
+            self.lyrics_var: first("lyrics", "unsyncedlyrics"),
+        }
+        for variable, value in values.items():
+            variable.set(value)
+        self.write_log("\n" + self.t("metadata_loaded").format(name=source.name) + "\n")
+
+    def clear_metadata(self):
+        if not self._paths_ready():
+            return
+        if messagebox.askyesno(self.app_name(), self.t("clear_confirm")):
+            self._run_process({"metadata"}, metadata_mode="clear")
+
+    def _metadata_values(self):
+        return {
+            "artist": self.artist_var.get(),
+            "album": self.album_var.get(),
+            "album_artist": self.album_artist_var.get(),
+            "composer": self.composer_var.get(),
+            "date": self.date_var.get(),
+            "track": self.track_var.get(),
+            "disc": self.disc_var.get(),
+            "comment": self.comment_var.get(),
+            "publisher": self.publisher_var.get(),
+            "copyright": self.copyright_var.get(),
+            "lyrics": self.lyrics_var.get(),
+        }
+
+    def _parse_seed(self):
+        text = self.seed_var.get().strip()
+        return None if not text else int(text)
+
+    def _process_kwargs(self):
+        return {
+            "source": self.source_var.get().strip(),
+            "output": self.output_var.get().strip(),
+            "title": self.title_var.get().strip() or None,
             "genre": self.genre_var.get().strip() or None,
             "color_mode": self.color_var.get(),
             "integrated_lufs": float(self.integrated_lufs_var.get()),
@@ -678,17 +280,27 @@ class SonicForgeApp(tk.Tk):
             "denoise": bool(self.denoise_var.get()),
             "denoise_strength": float(self.denoise_strength_var.get()),
             "limiter": bool(self.limiter_var.get()),
+            "bass_gain": float(self.bass_gain_var.get()),
+            "mid_gain": float(self.mid_gain_var.get()),
+            "treble_gain": float(self.treble_gain_var.get()),
+            "highpass_hz": float(self.highpass_hz_var.get()),
+            "lowpass_hz": float(self.lowpass_hz_var.get()),
+            "stereo_width": float(self.stereo_width_var.get()),
+            "compressor": bool(self.compressor_var.get()),
+            "compressor_threshold": float(self.compressor_threshold_var.get()),
+            "compressor_ratio": float(self.compressor_ratio_var.get()),
+            "compressor_attack": float(self.compressor_attack_var.get()),
+            "compressor_release": float(self.compressor_release_var.get()),
+            "compressor_makeup": float(self.compressor_makeup_var.get()),
+            "pitch_semitones": float(self.pitch_semitones_var.get()),
+            "playback_speed": float(self.playback_speed_var.get()),
+            "reverb_mix": float(self.reverb_mix_var.get()),
+            "fade_in": float(self.fade_in_var.get()),
+            "fade_out": float(self.fade_out_var.get()),
             "overwrite_genre": bool(self.overwrite_genre_var.get()),
-            "extra_metadata": {
-                "artist": self.artist_var.get(),
-                "album": self.album_var.get(),
-                "album_artist": self.album_artist_var.get(),
-                "composer": self.composer_var.get(),
-                "date": self.date_var.get(),
-                "track": self.track_var.get(),
-                "comment": self.comment_var.get(),
-            },
-            "cover_seed": cover_seed,
+            "overwrite_all_metadata": bool(self.overwrite_all_metadata_var.get()),
+            "extra_metadata": self._metadata_values(),
+            "cover_seed": self._parse_seed(),
             "cover_size": int(self.cover_size_var.get()),
             "cover_patterns": int(self.cover_patterns_var.get()),
             "center_title": bool(self.center_title_var.get()),
@@ -696,49 +308,219 @@ class SonicForgeApp(tk.Tk):
             "change_cover": not bool(self.no_change_cover_var.get()),
         }
 
-        self.run_button.configure(state=tk.DISABLED)
-        self.progress.start(12)
-        self._write_log("\n" + self.t("run_started") + "\n")
-        self.worker = threading.Thread(target=self._worker_run, args=(kwargs,), daemon=True)
+    def _paths_ready(self):
+        if self.source_var.get().strip() and self.output_var.get().strip():
+            return True
+        messagebox.showerror(self.app_name(), self.t("missing_paths"))
+        return False
+
+    def run_selected_steps(self):
+        steps = {
+            name
+            for name, variable in (
+                ("audio", self.process_audio_var),
+                ("metadata", self.process_metadata_var),
+                ("cover", self.process_cover_var),
+            )
+            if variable.get()
+        }
+        if not steps:
+            messagebox.showerror(self.app_name(), self.t("missing_steps"))
+            return
+        self._run_process(steps)
+
+    def _run_process(self, steps, metadata_mode=None):
+        if self.worker and self.worker.is_alive():
+            return
+        if not self._paths_ready():
+            return
+        try:
+            kwargs = self._process_kwargs()
+        except (ValueError, tk.TclError):
+            messagebox.showerror(self.app_name(), self.t("bad_seed"))
+            return
+        kwargs["process_steps"] = set(steps)
+        kwargs["metadata_mode"] = metadata_mode or (
+            "replace" if self.overwrite_all_metadata_var.get() else "update"
+        )
+        self.cancel_event.clear()
+        kwargs["cancel_event"] = self.cancel_event
+        self.view.set_busy(True)
+        self.write_log("\n" + self.t("run_started") + "\n")
+        self.worker = threading.Thread(target=self._process_worker, args=(kwargs,), daemon=True)
         self.worker.start()
 
-    def _worker_run(self, kwargs):
+    def _process_worker(self, kwargs):
         old_stdout, old_stderr = sys.stdout, sys.stderr
         sys.stdout = QueueWriter(self.log_queue)
         sys.stderr = QueueWriter(self.log_queue)
         try:
             easy_music_process.process_music(**kwargs)
-            self.log_queue.put("\n" + self.t("run_finished") + "\n")
+            result_key = "run_stopped" if self.cancel_event.is_set() else "run_finished"
+            self.log_queue.put(("__MESSAGE__", result_key))
         except Exception:
-            self.log_queue.put("\n" + self.t("error") + "\n")
-            self.log_queue.put(traceback.format_exc())
+            if self.cancel_event.is_set():
+                self.log_queue.put(("__MESSAGE__", "run_stopped"))
+            else:
+                self.log_queue.put("\n" + self.t("error") + "\n")
+                self.log_queue.put(traceback.format_exc())
         finally:
             sys.stdout, sys.stderr = old_stdout, old_stderr
             self.log_queue.put(("__DONE__", None))
+
+    def stop_processing(self):
+        if not self.worker or not self.worker.is_alive() or self.cancel_event.is_set():
+            return
+        self.cancel_event.set()
+        self.view.stop_button.configure(state=tk.DISABLED)
+        threading.Thread(target=self._terminate_media_processes, daemon=True).start()
+
+    def _terminate_media_processes(self):
+        try:
+            current = psutil.Process(os.getpid())
+            processes = [
+                process
+                for process in current.children(recursive=True)
+                if process.name().lower() in {"ffmpeg.exe", "ffprobe.exe"}
+            ]
+            for process in processes:
+                try:
+                    process.terminate()
+                except psutil.Error:
+                    pass
+            _, alive = psutil.wait_procs(processes, timeout=1.5)
+            for process in alive:
+                try:
+                    process.kill()
+                except psutil.Error:
+                    pass
+        except psutil.Error:
+            pass
 
     def _drain_log_queue(self):
         try:
             while True:
                 item = self.log_queue.get_nowait()
                 if isinstance(item, tuple) and item[0] == "__DONE__":
-                    self.progress.stop()
-                    self.run_button.configure(state=tk.NORMAL)
+                    self.view.set_busy(False)
+                elif isinstance(item, tuple) and item[0] == "__MESSAGE__":
+                    self.write_log("\n" + self.t(item[1]) + "\n")
                 else:
-                    self._write_log(item)
+                    self.write_log(item)
         except queue.Empty:
             pass
-        self.after(100, self._drain_log_queue)
+        self._log_after_id = self.after(100, self._drain_log_queue)
 
-    def _write_log(self, text):
-        self.log.insert(tk.END, text)
-        self.log.see(tk.END)
+    def _close(self):
+        if self.worker and self.worker.is_alive():
+            self.cancel_event.set()
+        if self._log_after_id is not None:
+            try:
+                self.after_cancel(self._log_after_id)
+            except tk.TclError:
+                pass
+            self._log_after_id = None
+        self.destroy()
 
-    def _clear_log(self):
-        self.log.delete("1.0", tk.END)
+    def write_log(self, text):
+        self.view.log.insert(tk.END, text)
+        self.view.log.see(tk.END)
+
+    def clear_log(self):
+        self.view.log.delete("1.0", tk.END)
+
+    def _bind_shortcuts(self):
+        for sequence, callback in (
+            ("<Control-a>", self._select_all),
+            ("<Control-A>", self._select_all),
+            ("<Control-c>", lambda event: self._edit_event(event, "<<Copy>>")),
+            ("<Control-C>", lambda event: self._edit_event(event, "<<Copy>>")),
+            ("<Control-x>", lambda event: self._edit_event(event, "<<Cut>>")),
+            ("<Control-X>", lambda event: self._edit_event(event, "<<Cut>>")),
+            ("<Control-v>", lambda event: self._edit_event(event, "<<Paste>>")),
+            ("<Control-V>", lambda event: self._edit_event(event, "<<Paste>>")),
+            ("<Control-z>", self._undo),
+            ("<Control-Z>", self._undo),
+        ):
+            self.bind_all(sequence, callback, add="+")
+        self.bind_all("<KeyPress>", self._before_edit, add="+")
+
+    def _editable_widget(self):
+        widget = self.focus_get()
+        return widget if isinstance(widget, (tk.Entry, tk.Text, ttk.Entry, ttk.Spinbox, ttk.Combobox)) else None
+
+    def _select_all(self, _event=None):
+        widget = self._editable_widget()
+        if widget is None:
+            return None
+        if isinstance(widget, tk.Text):
+            widget.tag_add(tk.SEL, "1.0", tk.END)
+            widget.mark_set(tk.INSERT, "1.0")
+        else:
+            widget.selection_range(0, tk.END)
+            widget.icursor(tk.END)
+        return "break"
+
+    def _edit_event(self, _event, event_name):
+        widget = self._editable_widget()
+        if widget is None:
+            return None
+        if event_name in {"<<Cut>>", "<<Paste>>"} and not isinstance(widget, tk.Text):
+            self._record_undo(widget)
+        try:
+            widget.event_generate(event_name)
+        except tk.TclError:
+            return None
+        return "break"
+
+    def _before_edit(self, event):
+        if event.state & 0x4:
+            return None
+        widget = self._editable_widget()
+        if widget is not None and not isinstance(widget, tk.Text):
+            self._record_undo(widget)
+        return None
+
+    def _record_undo(self, widget):
+        try:
+            snapshot = (widget.get(), int(widget.index(tk.INSERT)))
+        except (tk.TclError, ValueError):
+            return
+        history = self._undo_history.setdefault(widget, [])
+        if not history or history[-1] != snapshot:
+            history.append(snapshot)
+            if len(history) > 100:
+                del history[0]
+
+    def _undo(self, _event=None):
+        widget = self._editable_widget()
+        if widget is None:
+            return None
+        if isinstance(widget, tk.Text):
+            try:
+                widget.edit_undo()
+            except tk.TclError:
+                pass
+            return "break"
+        history = self._undo_history.get(widget, [])
+        if not history:
+            return "break"
+        text, cursor = history.pop()
+        try:
+            widget.delete(0, tk.END)
+            widget.insert(0, text)
+            widget.icursor(min(cursor, len(text)))
+        except tk.TclError:
+            pass
+        return "break"
 
 
-if __name__ == "__main__":
+def main():
     enable_high_dpi()
     configure_bundled_ffmpeg()
     app = SonicForgeApp()
     app.mainloop()
+
+
+if __name__ == "__main__":
+    main()

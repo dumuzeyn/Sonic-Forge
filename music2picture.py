@@ -1,9 +1,11 @@
 import argparse
+import colorsys
 import json
 import math
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -59,6 +61,11 @@ def run(command):
         errors="replace",
         **SUBPROCESS_STARTUP_KWARGS,
     )
+
+
+def check_cancelled(cancel_event):
+    if cancel_event is not None and cancel_event.is_set():
+        raise InterruptedError("Processing was cancelled.")
 
 
 def audio_files(source):
@@ -528,6 +535,182 @@ def estimate_energy_profile(spectrum, rms, bass, highs, centroid, bpm, bpm_curve
     return curve, global_energy, diagnostics
 
 
+@dataclass(frozen=True)
+class SongCharacter:
+    bpm: float
+    speed: float
+    beat_density: float
+    rhythmicity: float
+    tempo_variation: float
+    change_rate: float
+    relaxation: float
+    hardness: float
+    brightness: float
+    bass_weight: float
+    dynamic_range: float
+    icon_kind: str
+
+
+def analyze_song_character(
+    spectrum,
+    rms,
+    bass,
+    mids,
+    highs,
+    centroid,
+    bpm,
+    bpm_curve,
+    sample_rate=22050,
+    hop=512,
+):
+    frame_count = max(1, rms.size)
+    duration = max(frame_count * hop / sample_rate, 1e-6)
+    rms_values = np.clip(np.asarray(rms, dtype=np.float32), 0, 1)
+    bass_values = np.clip(np.asarray(bass, dtype=np.float32), 0, 1)
+    mid_values = np.clip(np.asarray(mids, dtype=np.float32), 0, 1)
+    high_values = np.clip(np.asarray(highs, dtype=np.float32), 0, 1)
+    centroid_values = np.clip(np.asarray(centroid, dtype=np.float32), 0, 1)
+
+    spectral_flux = np.sqrt(
+        np.mean(
+            np.diff(spectrum, axis=1, prepend=spectrum[:, :1]) ** 2,
+            axis=0,
+        )
+    )
+    rms_jump = np.maximum(0, np.diff(rms_values, prepend=rms_values[0]))
+    bass_jump = np.maximum(0, np.diff(bass_values, prepend=bass_values[0]))
+    onset_signal = rms_jump * 1.30 + bass_jump * 0.55 + spectral_flux * 2.15
+    onset_threshold = max(0.025, float(np.percentile(onset_signal, 76)))
+    onset_mask = (
+        (onset_signal > onset_threshold)
+        & (onset_signal >= np.roll(onset_signal, 1))
+        & (onset_signal > np.roll(onset_signal, -1))
+    )
+    onset_indices = np.flatnonzero(onset_mask)
+    attacks_per_second = float(onset_indices.size / duration)
+    beat_density = float(fixed_scale(attacks_per_second, 0.45, 8.0))
+
+    if onset_indices.size >= 4:
+        intervals = np.diff(onset_indices).astype(np.float32)
+        interval_variation = float(np.std(intervals) / max(np.mean(intervals), 1e-6))
+        beat_regularity = float(np.clip(1.0 - interval_variation / 0.95, 0, 1))
+    else:
+        beat_regularity = 0.18
+
+    onset_strength = float(
+        fixed_scale(np.mean(onset_signal[onset_mask]) if np.any(onset_mask) else 0.0, 0.025, 0.22)
+    )
+    rhythmicity = float(
+        np.clip(beat_density * 0.52 + beat_regularity * 0.30 + onset_strength * 0.18, 0, 1)
+    )
+
+    bpm_values = np.asarray(bpm_curve, dtype=np.float32)
+    tempo_spread = float(np.percentile(bpm_values, 90) - np.percentile(bpm_values, 10))
+    tempo_turns = float(np.mean(np.abs(np.diff(smooth_curve(bpm_values, passes=4)))))
+    tempo_variation = float(
+        np.clip(
+            float(fixed_scale(tempo_spread, 4.0, 50.0)) * 0.72
+            + float(fixed_scale(tempo_turns, 0.10, 2.4)) * 0.28,
+            0,
+            1,
+        )
+    )
+
+    speed = float(fixed_scale(bpm, 58.0, 182.0))
+    brightness = float(
+        np.clip(
+            float(fixed_scale(np.mean(centroid_values), 0.18, 0.68)) * 0.70
+            + float(fixed_scale(np.mean(high_values), 0.12, 0.58)) * 0.30,
+            0,
+            1,
+        )
+    )
+    band_total = float(
+        np.mean(bass_values) + np.mean(mid_values) + np.mean(high_values) + 1e-6
+    )
+    bass_ratio = float(np.mean(bass_values) / band_total)
+    bass_weight = float(fixed_scale(bass_ratio, 0.40, 0.62))
+    dynamic_range = float(
+        fixed_scale(
+            np.percentile(rms_values, 92) - np.percentile(rms_values, 12),
+            0.12,
+            0.76,
+        )
+    )
+    flux_level = float(fixed_scale(np.mean(spectral_flux), 0.008, 0.085))
+    loudness = float(fixed_scale(np.mean(rms_values), 0.12, 0.64))
+    hardness = float(
+        np.clip(
+            brightness * 0.35
+            + bass_weight * 0.05
+            + onset_strength * 0.25
+            + flux_level * 0.25
+            + loudness * 0.10,
+            0,
+            1,
+        )
+    )
+    change_rate = float(
+        np.clip(
+            tempo_variation * 0.34
+            + flux_level * 0.34
+            + dynamic_range * 0.18
+            + float(fixed_scale(np.mean(rms_jump), 0.006, 0.065)) * 0.14,
+            0,
+            1,
+        )
+    )
+    relaxation = float(
+        np.clip(
+            1.0
+            - (
+                speed * 0.22
+                + rhythmicity * 0.18
+                + hardness * 0.29
+                + change_rate * 0.20
+                + loudness * 0.11
+            ),
+            0,
+            1,
+        )
+    )
+
+    if (
+        relaxation >= 0.50
+        and speed < 0.45
+        and brightness < 0.30
+        and change_rate < 0.65
+    ):
+        icon_kind = "horizon"
+    elif hardness >= 0.66:
+        icon_kind = "bolt"
+    elif tempo_variation >= 0.48 or change_rate >= 0.64:
+        icon_kind = "spiral"
+    elif bass_weight >= 0.60:
+        icon_kind = "bass"
+    elif rhythmicity >= 0.58:
+        icon_kind = "pulse"
+    elif brightness >= 0.62:
+        icon_kind = "star"
+    else:
+        icon_kind = "wave"
+
+    return SongCharacter(
+        bpm=float(bpm),
+        speed=speed,
+        beat_density=beat_density,
+        rhythmicity=rhythmicity,
+        tempo_variation=tempo_variation,
+        change_rate=change_rate,
+        relaxation=relaxation,
+        hardness=hardness,
+        brightness=brightness,
+        bass_weight=bass_weight,
+        dynamic_range=dynamic_range,
+        icon_kind=icon_kind,
+    )
+
+
 def peak_emphasis(values):
     values = values.astype(np.float32)
     smooth = values.copy()
@@ -736,7 +919,7 @@ def render_random_cover(
     mid_map = sample_curve(mids_line, part_pos)
     high_map = sample_curve(highs_line, part_pos)
     volume_map = sample_curve(volume, part_pos)
-    if color_mode == "ocean":
+    if color_mode in {"ocean", "aurora"}:
         bpm_texture = (field_a - 0.5) * (1.6 + 1.2 * peak_rows) + pattern_signal * 1.1
         pixel_bpm = (local_bpm + bpm_texture).astype(np.float32)
         pixel_bpm = np.clip(pixel_bpm, 30, 200)
@@ -744,10 +927,11 @@ def render_random_cover(
         hue_shift = (field_a - 0.5) * 0.014 + pattern_signal * 0.010 + spectrum_value * 0.006
         red_lock = np.clip((40.0 - pixel_bpm) / 10.0, 0, 1)
         hue_shift = np.where(red_lock > 0, np.minimum(hue_shift, 0), hue_shift)
-        hue = np.mod(bpm_to_hue(pixel_bpm) + hue_shift, 1.0)
+        bpm_position = np.clip((pixel_bpm - 30.0) / 170.0, 0, 1)
+        hue = np.mod(0.48 + bpm_position * 0.25 + hue_shift, 1.0)
         saturation = np.clip(0.52 + spectrum_value * 0.18 + high_map * 0.08 + peak_rows * 0.12, 0, 1)
         value = np.clip(0.14 + spectrum_value * 0.48 + volume_map * 0.28 + bass_map * 0.10 + peak_rows * 0.30, 0, 1)
-    elif color_mode in {"plasma", "fusion", "aurora"}:
+    elif color_mode in {"plasma", "fusion"}:
         brightness_bias = np.clip((float(np.mean(highs_line)) - float(np.mean(bass_line))) * 0.18, -0.08, 0.08)
         bass_bias = np.clip((float(np.mean(bass_line)) - 0.38) * 0.10, -0.04, 0.05)
         color_energy = np.clip(global_energy + brightness_bias + bass_bias, 0, 1)
@@ -772,24 +956,16 @@ def render_random_cover(
             plasma_wave = np.sin((xx * 0.016 - yy * 0.010 + field_d * 5.0 + field_a * 1.6) * math.pi)
             plasma_lane = np.power(np.clip(plasma_wave * 0.5 + 0.5, 0, 1), 3.2)
             plasma_lane *= np.clip(0.42 + sharp_mix * 0.48 + peak_rows * 0.28, 0, 1)
-            cool = np.asarray((0.08, 0.42, 1.00), dtype=np.float32)
-            hot = np.asarray((1.00, 0.18, 0.54), dtype=np.float32)
-            lane_color = cool * (1.0 - local_energy[..., None]) + hot * local_energy[..., None]
-            rgb = rgb * (1.0 - plasma_lane[..., None] * 0.30) + lane_color * (plasma_lane[..., None] * 0.30)
-            rgb = np.clip((rgb - 0.5) * 1.10 + 0.5, 0, 1)
-        elif color_mode == "aurora":
-            aurora_phase = yy * (0.008 + 0.004 * global_energy) - xx * 0.004 + field_a * 4.4 + field_c * 2.1
-            aurora_wave = np.sin(aurora_phase * math.pi) * 0.5 + 0.5
-            aurora_band = np.power(np.clip(aurora_wave, 0, 1), 2.8)
-            aurora_band *= np.clip(0.34 + volume_map * 0.34 + high_map * 0.22 + (1.0 - sharp_mix) * 0.16, 0, 1)
-            teal = np.asarray((0.06, 0.92, 0.72), dtype=np.float32)
-            violet = np.asarray((0.54, 0.18, 1.00), dtype=np.float32)
-            rose = np.asarray((1.00, 0.18, 0.72), dtype=np.float32)
-            aurora_color = teal * (1.0 - local_energy[..., None]) + violet * local_energy[..., None]
-            rose_mix = np.clip(high_map * 0.45 + spectrum_value * 0.24, 0, 0.55)[..., None]
-            aurora_color = aurora_color * (1.0 - rose_mix) + rose * rose_mix
-            rgb = rgb * (1.0 - aurora_band[..., None] * 0.34) + aurora_color * (aurora_band[..., None] * 0.34)
-            rgb = np.clip(rgb * (0.94 + aurora_band[..., None] * 0.26), 0, 1)
+            deep_red = np.asarray((0.46, 0.01, 0.03), dtype=np.float32)
+            hot_red = np.asarray((1.00, 0.04, 0.08), dtype=np.float32)
+            orange = np.asarray((1.00, 0.38, 0.03), dtype=np.float32)
+            red_mix = np.clip(0.38 + local_energy * 0.42 + peak_rows * 0.26, 0, 0.92)[..., None]
+            energy_color = deep_red * (1.0 - red_mix) + hot_red * red_mix
+            orange_mix = np.clip(high_map * 0.30 + spectrum_value * 0.22, 0, 0.42)[..., None]
+            energy_color = energy_color * (1.0 - orange_mix) + orange * orange_mix
+            rgb = rgb * 0.30 + energy_color * 0.70
+            rgb = rgb * (1.0 - plasma_lane[..., None] * 0.24) + orange * (plasma_lane[..., None] * 0.24)
+            rgb = np.clip((rgb - 0.5) * 1.14 + 0.5, 0, 1)
     else:
         raise ValueError(f"Unknown color mode: {color_mode}")
 
@@ -803,28 +979,450 @@ def render_random_cover(
         + pattern_edge * 2.15
     )
     edge_pattern = np.clip(edge_pattern * (11 + 28 * sharp_mix), 0, 1)
-    if color_mode == "ocean":
+    if color_mode in {"ocean", "aurora"}:
         rgb = hsv_to_rgb_array(hue, saturation, value)
         rgb = apply_local_pattern_edges(rgb, pattern_edge, high_map, spectrum_value, sharp_mix)
-    elif color_mode in {"plasma", "fusion", "aurora"}:
+    elif color_mode in {"plasma", "fusion"}:
         accent_mask = np.clip((high_map - 0.82) * 1.65 + edge_pattern * 0.045, 0, 1)
         accent_mask *= np.clip(pixel_energy - 0.58, 0, 0.42) / 0.42
         accent = np.asarray((1.00, 0.48, 0.10), dtype=np.float32)
-        warm_strength = 0.040 if color_mode == "plasma" else (0.035 if color_mode == "aurora" else 0.055)
+        warm_strength = 0.16 if color_mode == "plasma" else 0.08
         rgb = rgb * (1.0 - accent_mask[..., None] * warm_strength) + accent * (accent_mask[..., None] * warm_strength)
         blue_mask = np.clip((field_b - 0.48) * 2.65 + (high_map - bass_map) * 1.75 + spectrum_value * 0.30 + edge_pattern * 0.15, 0, 1)
         blue_mask *= np.clip(0.92 - pixel_energy, 0, 0.92) / 0.92
         blue = np.asarray((0.06, 0.26, 1.00), dtype=np.float32)
-        blue_strength = 0.38 if color_mode == "plasma" else (0.42 if color_mode == "aurora" else 0.50)
+        blue_strength = 0.10 if color_mode == "plasma" else 0.46
         rgb = rgb * (1.0 - blue_mask[..., None] * blue_strength) + blue * (blue_mask[..., None] * blue_strength)
         green_mask = np.clip((field_c - 0.40) * 2.65 + (mid_map + bass_map - high_map * 0.35) * 0.95 + (1.0 - sharp_mix) * 0.24, 0, 1)
         green_mask *= np.clip(0.86 - pixel_energy, 0, 0.86) / 0.86
         green = np.asarray((0.04, 0.78, 0.34), dtype=np.float32)
-        green_strength = 0.28 if color_mode == "plasma" else (0.34 if color_mode == "aurora" else 0.52)
+        green_strength = 0.08 if color_mode == "plasma" else 0.48
         rgb = rgb * (1.0 - green_mask[..., None] * green_strength) + green * (green_mask[..., None] * green_strength)
         rgb = apply_local_pattern_edges(rgb, pattern_edge, high_map, spectrum_value, sharp_mix)
     rgb *= np.clip(0.90 + edge_pattern[..., None] * (0.14 + sharp_mix[..., None] * 0.78), 0.70, 1.30)
     return np.clip(rgb * 255, 0, 255).astype(np.uint8)
+
+
+def interpolate_palette(values, palette):
+    values = np.clip(np.asarray(values, dtype=np.float32), 0, 1)
+    palette = np.asarray(palette, dtype=np.float32)
+    position = values * (len(palette) - 1)
+    lower = np.floor(position).astype(np.int32)
+    upper = np.minimum(lower + 1, len(palette) - 1)
+    mix = (position - lower)[..., None]
+    return palette[lower] * (1.0 - mix) + palette[upper] * mix
+
+
+def character_palette(profile, color_mode):
+    """Use the mode as a visual behavior while song features choose its colors."""
+    hue = (
+        0.04
+        + profile.speed * 0.19
+        + profile.rhythmicity * 0.31
+        + profile.tempo_variation * 0.47
+        + profile.brightness * 0.61
+        + profile.bass_weight * 0.73
+        + profile.dynamic_range * 0.83
+    ) % 1.0
+
+    if color_mode == "ocean":
+        hue = 0.49 + hue * 0.13
+        stops = [
+            (hue - 0.06, 0.76, 0.06),
+            (hue - 0.02, 0.82, 0.22),
+            (hue + 0.03, 0.75, 0.44),
+            (hue + 0.09, 0.68, 0.70),
+            (hue + 0.15, 0.58, 0.88),
+        ]
+    elif color_mode == "plasma":
+        secondary_hue = (
+            hue
+            + 0.08
+            + profile.tempo_variation * 0.15
+            + profile.rhythmicity * 0.09
+        ) % 1.0
+        stops = [
+            (hue - 0.04, 0.92, 0.08),
+            (hue, 0.98, 0.28),
+            (hue + 0.035, 0.96, 0.58),
+            (secondary_hue, 0.92, 0.82),
+            (secondary_hue + 0.055, 0.78, 1.00),
+        ]
+    elif color_mode == "fusion":
+        stops = [
+            (hue, 0.86, 0.08),
+            (hue + 0.08, 0.88, 0.36),
+            (hue + 0.34, 0.82, 0.58),
+            (hue + 0.55, 0.90, 0.78),
+            (hue + 0.76, 0.78, 0.98),
+        ]
+    elif color_mode == "aurora":
+        hue = 0.31 + hue * 0.18
+        stops = [
+            (hue - 0.06, 0.78, 0.06),
+            (hue, 0.84, 0.25),
+            (hue + 0.09, 0.78, 0.54),
+            (hue + 0.31, 0.72, 0.72),
+            (hue + 0.46, 0.62, 0.94),
+        ]
+    else:
+        raise ValueError(f"Unknown color mode: {color_mode}")
+
+    return np.asarray(
+        [
+            tuple(
+                channel * 255
+                for channel in colorsys.hsv_to_rgb(
+                    stop_hue % 1.0,
+                    saturation,
+                    value,
+                )
+            )
+            for stop_hue, saturation, value in stops
+        ],
+        dtype=np.float32,
+    )
+
+
+def render_character_background(
+    size,
+    profile,
+    energy_curve,
+    rms,
+    bass,
+    mids,
+    highs,
+    color_mode,
+    patterns,
+    rng,
+):
+    """Render broad, thumbnail-friendly regions driven by the song profile."""
+    yy, xx = np.mgrid[0:size, 0:size].astype(np.float32)
+    nx = xx / max(1, size - 1) * 2.0 - 1.0
+    ny = yy / max(1, size - 1) * 2.0 - 1.0
+
+    angle = (
+        -0.70
+        + profile.speed * 1.15
+        + profile.tempo_variation * 0.52
+        + float(rng.uniform(-0.24, 0.24))
+    )
+    direction = nx * math.cos(angle) + ny * math.sin(angle)
+    broad_a = smooth_random_field(
+        size,
+        cells=4 + int(round(profile.change_rate * 3)),
+        rng=rng,
+        detail=0.0,
+    )
+    broad_b = smooth_random_field(
+        size,
+        cells=3 + int(round(profile.rhythmicity * 3)),
+        rng=rng,
+        detail=0.0,
+    )
+    radial_x = nx + float(rng.uniform(-0.28, 0.28))
+    radial_y = ny + float(rng.uniform(-0.22, 0.22))
+    radial = 1.0 - np.clip(np.sqrt(radial_x**2 + radial_y**2) / 1.45, 0, 1)
+
+    slow_wave = np.sin(
+        direction * math.pi * (0.62 + profile.rhythmicity * 1.25)
+        + broad_b * (1.4 + profile.tempo_variation * 2.2)
+    )
+    field = (
+        0.31 * broad_a
+        + 0.19 * broad_b
+        + 0.19 * (direction * 0.5 + 0.5)
+        + 0.16 * (slow_wave * 0.5 + 0.5)
+        + 0.15 * radial
+    )
+
+    region_count = 3 + patterns + int(
+        round(profile.change_rate * 2 + profile.rhythmicity * 2)
+    )
+    quantized = np.round(np.clip(field, 0, 1) * (region_count - 1)) / max(
+        1, region_count - 1
+    )
+    soft_mix = 0.28 + profile.relaxation * 0.30
+    field = quantized * (1.0 - soft_mix) + field * soft_mix
+    field_image = Image.fromarray(np.uint8(np.clip(field, 0, 1) * 255), "L")
+    blur_radius = size * (0.010 + profile.relaxation * 0.020)
+    field_image = field_image.filter(ImageFilter.GaussianBlur(blur_radius))
+    field = np.asarray(field_image, dtype=np.float32) / 255.0
+
+    energy = resample_axis(energy_curve, size)
+    volume = resample_axis(rms, size)
+    bass_line = resample_axis(bass, size)
+    mids_line = resample_axis(mids, size)
+    highs_line = resample_axis(highs, size)
+    timeline = (
+        energy * 0.38
+        + volume * 0.22
+        + bass_line * 0.18
+        + mids_line * 0.12
+        + highs_line * 0.10
+    )
+    timeline = smooth_curve(timeline, passes=12, center_weight=5.0)
+    timeline_map = np.broadcast_to(timeline[None, :], (size, size))
+    field = np.clip(field * 0.78 + timeline_map * 0.22, 0, 1)
+
+    palette = character_palette(profile, color_mode)
+    brightness_shift = (profile.brightness - 0.5) * 18.0
+    palette[1:] = np.clip(palette[1:] + brightness_shift, 0, 255)
+    rgb = interpolate_palette(field, palette)
+
+    bass_shadow = np.clip((ny * 0.5 + 0.5) * profile.bass_weight * 0.24, 0, 0.24)
+    center_light = radial[..., None] * (0.08 + profile.brightness * 0.08)
+    rgb = rgb * (1.0 - bass_shadow[..., None])
+    rgb = rgb * (1.0 + center_light)
+
+    image = Image.fromarray(np.uint8(np.clip(rgb, 0, 255)), "RGB").convert("RGBA")
+    ribbon_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(ribbon_layer, "RGBA")
+    ribbon_count = 1 + patterns + int(round(profile.beat_density * 2))
+    accent = tuple(int(value) for value in palette[-1])
+    secondary = tuple(int(value) for value in palette[max(1, len(palette) - 2)])
+    for ribbon_index in range(ribbon_count):
+        baseline = size * (0.18 + 0.64 * (ribbon_index + 1) / (ribbon_count + 1))
+        amplitude = size * (
+            0.025
+            + profile.dynamic_range * 0.045
+            + profile.tempo_variation * 0.025
+        )
+        points = []
+        phase = float(rng.uniform(0, math.tau))
+        for x in range(0, size + 1, max(4, size // 180)):
+            sample_index = min(size - 1, x)
+            local = timeline[sample_index] - 0.5
+            wave = math.sin(
+                x / size * math.tau * (0.70 + profile.speed * 1.55) + phase
+            )
+            y = baseline + amplitude * (wave * 0.56 + local * 1.15)
+            points.append((x, y))
+        width = max(2, int(size * (0.006 + profile.hardness * 0.006)))
+        color = accent if ribbon_index % 2 == 0 else secondary
+        draw.line(points, fill=color + (58 + int(profile.rhythmicity * 52),), width=width)
+
+    ribbon_layer = ribbon_layer.filter(
+        ImageFilter.GaussianBlur(size * (0.0015 + profile.relaxation * 0.002))
+    )
+    image = Image.alpha_composite(image, ribbon_layer)
+
+    vignette = np.clip((np.sqrt(nx**2 + ny**2) - 0.54) / 0.78, 0, 1)
+    vignette_strength = 0.16 + profile.hardness * 0.08
+    array = np.asarray(image.convert("RGB"), dtype=np.float32)
+    array *= 1.0 - vignette[..., None] * vignette_strength
+    return np.uint8(np.clip(array, 0, 255))
+
+
+def _draw_character_symbol(draw, bounds, kind, fill, light, accent, outline_width):
+    left, top, right, bottom = bounds
+    width = right - left
+    height = bottom - top
+    cx = (left + right) / 2
+    cy = (top + bottom) / 2
+
+    def point(x, y):
+        return left + x * width, top + y * height
+
+    outline = light
+    if kind == "bolt":
+        points = [
+            point(0.58, 0.02),
+            point(0.18, 0.54),
+            point(0.46, 0.54),
+            point(0.35, 0.98),
+            point(0.82, 0.40),
+            point(0.54, 0.40),
+        ]
+        draw.polygon(points, fill=fill, outline=outline, width=outline_width)
+        draw.line([point(0.58, 0.04), point(0.48, 0.41), point(0.77, 0.41)], fill=accent, width=outline_width)
+    elif kind == "bass":
+        for radius, color, stroke in (
+            (0.43, light, outline_width * 2),
+            (0.31, accent, outline_width * 2),
+            (0.19, light, outline_width),
+        ):
+            draw.ellipse(
+                [
+                    (cx - width * radius, cy - height * radius),
+                    (cx + width * radius, cy + height * radius),
+                ],
+                outline=color,
+                width=stroke,
+            )
+        draw.ellipse(
+            [point(0.43, 0.43), point(0.57, 0.57)],
+            fill=accent,
+            outline=outline,
+            width=outline_width,
+        )
+        for offset in (-0.30, 0.30):
+            draw.arc(
+                [point(0.03 + max(offset, 0), 0.23), point(0.97 + min(offset, 0), 0.77)],
+                118 if offset < 0 else 298,
+                242 if offset < 0 else 422,
+                fill=accent,
+                width=outline_width,
+            )
+    elif kind == "pulse":
+        points = [
+            point(0.04, 0.56),
+            point(0.23, 0.56),
+            point(0.34, 0.30),
+            point(0.47, 0.76),
+            point(0.61, 0.18),
+            point(0.73, 0.56),
+            point(0.96, 0.56),
+        ]
+        draw.line(points, fill=outline, width=outline_width * 4, joint="curve")
+        draw.line(points, fill=accent, width=outline_width * 2, joint="curve")
+    elif kind == "spiral":
+        points = []
+        for index in range(95):
+            turn = index / 94 * math.tau * 2.35
+            radius = width * 0.42 * index / 94
+            points.append((cx + math.cos(turn) * radius, cy + math.sin(turn) * radius))
+        draw.line(points, fill=outline, width=outline_width * 4, joint="curve")
+        draw.line(points, fill=accent, width=outline_width * 2, joint="curve")
+    elif kind == "horizon":
+        draw.ellipse(
+            [point(0.30, 0.15), point(0.70, 0.55)],
+            fill=fill,
+            outline=outline,
+            width=outline_width,
+        )
+        draw.arc(
+            [point(0.33, 0.18), point(0.67, 0.52)],
+            188,
+            352,
+            fill=accent,
+            width=outline_width * 2,
+        )
+        draw.line(
+            [point(0.06, 0.58), point(0.94, 0.58)],
+            fill=accent,
+            width=outline_width * 2,
+        )
+        for offset in (0.0, 0.12, 0.24):
+            draw.arc(
+                [
+                    point(0.08 + offset, 0.51 + offset * 0.30),
+                    point(0.92 - offset, 0.90 - offset * 0.10),
+                ],
+                200,
+                340,
+                fill=light if offset else accent,
+                width=outline_width,
+            )
+    elif kind == "star":
+        points = []
+        for index in range(10):
+            angle = -math.pi / 2 + index * math.pi / 5
+            radius = width * (0.45 if index % 2 == 0 else 0.20)
+            points.append((cx + math.cos(angle) * radius, cy + math.sin(angle) * radius))
+        draw.polygon(points, fill=fill, outline=outline, width=outline_width)
+        draw.ellipse([point(0.40, 0.40), point(0.60, 0.60)], fill=accent)
+    else:
+        points = []
+        for index in range(65):
+            x = index / 64
+            envelope = math.sin(x * math.pi) ** 0.75
+            y = 0.5 + math.sin(x * math.tau * 2.25) * envelope * 0.27
+            points.append(point(x * 0.92 + 0.04, y))
+        draw.line(points, fill=outline, width=outline_width * 4, joint="curve")
+        draw.line(points, fill=accent, width=outline_width * 2, joint="curve")
+
+
+def add_song_identity(image, title, profile, color_mode, show_title=True, rng=None):
+    if rng is None:
+        rng = np.random.default_rng()
+    base = image.convert("RGBA")
+    size = min(base.size)
+    symbol_size = int(size * 0.50)
+    left = (base.width - symbol_size) // 2
+    top = (base.height - symbol_size) // 2
+    bounds = (left, top, left + symbol_size, top + symbol_size)
+
+    accent = music_edge_color(base, rng) + (246,)
+    graphite = (35, 38, 45, 228)
+    metal = (222, 226, 232, 244)
+    outline_width = max(2, size // 115)
+
+    shadow = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    shadow_draw = ImageDraw.Draw(shadow, "RGBA")
+    shadow_offset = max(4, size // 80)
+    shadow_bounds = tuple(value + shadow_offset for value in bounds)
+    _draw_character_symbol(
+        shadow_draw,
+        shadow_bounds,
+        profile.icon_kind,
+        (0, 0, 0, 205),
+        (0, 0, 0, 205),
+        (0, 0, 0, 205),
+        outline_width,
+    )
+    shadow = shadow.filter(ImageFilter.GaussianBlur(max(2, size // 100)))
+    base = Image.alpha_composite(base, shadow)
+
+    symbol = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    symbol_draw = ImageDraw.Draw(symbol, "RGBA")
+    _draw_character_symbol(
+        symbol_draw,
+        bounds,
+        profile.icon_kind,
+        graphite,
+        metal,
+        accent,
+        outline_width,
+    )
+    base = Image.alpha_composite(base, symbol)
+
+    if show_title and title:
+        text = title.upper()
+        max_text_width = int(size * 0.67)
+        max_text_height = int(size * 0.26)
+        fit = fit_text_to_square(text, max_text_width)
+        if fit is not None:
+            font, lines, line_gap, _, _, _, _ = fit
+            while font.size > 14:
+                text_width, text_height = text_block_size(
+                    lines, font, ImageDraw.Draw(base), line_gap
+                )
+                if text_height <= max_text_height:
+                    break
+                font = title_font(font.size - 1)
+                line_gap = max(2, font.size // 12)
+                lines = wrap_text(text, font, ImageDraw.Draw(base), max_text_width)
+
+            draw = ImageDraw.Draw(base, "RGBA")
+            line_boxes = [draw.textbbox((0, 0), line, font=font) for line in lines]
+            line_heights = [box[3] - box[1] for box in line_boxes]
+            total_height = sum(line_heights) + max(0, len(lines) - 1) * line_gap
+            y = (base.height - total_height) / 2
+            stroke_width = max(2, font.size // 18)
+            for line, box, line_height in zip(lines, line_boxes, line_heights):
+                line_width = box[2] - box[0]
+                x = (base.width - line_width) / 2 - box[0]
+                baseline_y = y - box[1]
+                draw.text(
+                    (x, baseline_y),
+                    line,
+                    font=font,
+                    fill=(250, 251, 252, 255),
+                    stroke_width=stroke_width + 2,
+                    stroke_fill=(16, 18, 23, 238),
+                )
+                draw.text(
+                    (x, baseline_y),
+                    line,
+                    font=font,
+                    fill=(250, 251, 252, 255),
+                    stroke_width=max(1, stroke_width // 2),
+                    stroke_fill=accent,
+                )
+                y += line_height + line_gap
+
+    return base.convert("RGB")
 
 
 def title_font(size):
@@ -891,7 +1489,6 @@ def balanced_text_layouts(text, font, draw, max_width):
     else:
         layouts.append(wrap_text(text, font, draw, max_width))
 
-    single_word_layout = [[word] for word in words]
     if all((draw.textbbox((0, 0), word, font=font)[2] - draw.textbbox((0, 0), word, font=font)[0]) <= max_width for word in words):
         layouts.append(words)
 
@@ -984,8 +1581,6 @@ def add_center_title(image, title, square_ratio=0.76, rng=None):
     draw = ImageDraw.Draw(overlay)
     text = title.upper()
     square_size = int(min(width, height) * square_ratio)
-    square_left = (width - square_size) / 2
-    square_top = (height - square_size) / 2
     padding = max(10, square_size // 42)
     inner_size = square_size - padding * 2
 
@@ -1001,7 +1596,6 @@ def add_center_title(image, title, square_ratio=0.76, rng=None):
     fill_texture = patterned_text_fill(image, text_fill, rng)
     sx, sy = shadow_offset
     line_boxes = [draw.textbbox((0, 0), line, font=font) for line in lines]
-    line_widths = [box[2] - box[0] for box in line_boxes]
     line_heights = [box[3] - box[1] for box in line_boxes]
     text_height = sum(line_heights) + max(0, len(lines) - 1) * line_gap
     y = (height - (text_height + sy)) / 2
@@ -1037,57 +1631,83 @@ def add_center_title(image, title, square_ratio=0.76, rng=None):
     return Image.alpha_composite(base, overlay).convert("RGB")
 
 
-def make_cover(audio_path, output_path, size=1000, patterns=2, center_title=True, color_mode="plasma", seed=None):
+def make_cover(
+    audio_path,
+    output_path,
+    size=1000,
+    patterns=2,
+    center_title=True,
+    color_mode="plasma",
+    seed=None,
+    cancel_event=None,
+):
     color_mode = normalize_color_mode(color_mode)
 
+    check_cancelled(cancel_event)
     rng = np.random.default_rng(seed)
     audio = read_audio(audio_path)
+    check_cancelled(cancel_event)
     spectrum, rms, bass, mids, highs, centroid = stft_features(audio)
     bpm = estimate_bpm(rms)
     bpm_curve = estimate_bpm_curve_from_bass(bass, size)
     energy_curve, global_energy, diagnostics = estimate_energy_profile(spectrum, rms, bass, highs, centroid, bpm, bpm_curve, size)
-    motion_curve = energy_curve if color_mode in {"plasma", "fusion", "aurora"} else estimate_motion_curve(spectrum, rms, centroid, bpm_curve, size)
-    rgb = render_random_cover(
+    profile = analyze_song_character(
         spectrum,
         rms,
         bass,
         mids,
         highs,
+        centroid,
+        bpm,
+        bpm_curve,
+    )
+    check_cancelled(cancel_event)
+    rgb = render_character_background(
         size,
-        patterns=patterns,
-        bpm=bpm,
-        bpm_curve=bpm_curve,
+        profile,
+        energy_curve,
+        rms,
+        bass,
+        mids,
+        highs,
         color_mode=color_mode,
-        motion_curve=motion_curve,
-        energy_curve=energy_curve,
-        global_energy=global_energy,
+        patterns=patterns,
         rng=rng,
     )
+    check_cancelled(cancel_event)
 
     image = Image.fromarray(rgb, "RGB")
-    image = ImageEnhance.Color(image).enhance(1.12 + 0.16 * global_energy)
-    image = ImageEnhance.Contrast(image).enhance(1.03 + 0.12 * global_energy)
-    if center_title:
-        image = add_center_title(image, clean_stem(audio_path), rng=rng)
+    image = ImageEnhance.Color(image).enhance(1.04 + 0.10 * profile.hardness)
+    image = ImageEnhance.Contrast(image).enhance(1.02 + 0.11 * profile.hardness)
+    image = add_song_identity(
+        image,
+        clean_stem(audio_path),
+        profile,
+        color_mode,
+        show_title=center_title,
+        rng=rng,
+    )
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(output_path)
-    if color_mode in {"plasma", "fusion", "aurora"}:
+    if color_mode in {"plasma", "fusion"}:
         detail = f"energy: {float(global_energy):.2f} ({classify_energy(global_energy)}), local: {float(np.min(energy_curve)):.2f}-{float(np.max(energy_curve)):.2f}"
     else:
         detail = f"local BPM: {float(np.min(bpm_curve)):.1f}-{float(np.max(bpm_curve)):.1f}"
     print(f"Cover saved: {output_path} (mode: {COLOR_MODE_LABELS[color_mode]}, BPM: {bpm:.1f}, {detail})")
     print(
-        "Diagnostics: "
+        "Song profile: "
         f"BPM={bpm:.1f}, "
-        f"global energy score={global_energy:.3f}, "
-        f"classification={classify_energy(global_energy)}, "
-        f"attack density={diagnostics['attack_density']:.2f}/s, "
-        f"spectral flux={diagnostics['spectral_flux']:.4f}, "
-        f"RMS contrast={diagnostics['rms_contrast']:.4f}, "
-        f"peak density={diagnostics['peak_density']:.2f}/s, "
-        f"dominant palette category={palette_category(global_energy)}"
+        f"speed={profile.speed:.2f}, "
+        f"beat density={profile.beat_density:.2f}, "
+        f"rhythmicity={profile.rhythmicity:.2f}, "
+        f"tempo variation={profile.tempo_variation:.2f}, "
+        f"relaxation={profile.relaxation:.2f}, "
+        f"hardness={profile.hardness:.2f}, "
+        f"brightness={profile.brightness:.2f}, "
+        f"bass={profile.bass_weight:.2f}, "
+        f"icon={profile.icon_kind}"
     )
     return output_path
 
@@ -1130,7 +1750,17 @@ def embed_cover(mp3_path, image_path):
     print(f"Embedded cover into: {mp3_path}")
 
 
-def make_covers(source, output, size=1000, patterns=2, center_title=True, embed=False, color_mode="plasma", seed=None):
+def make_covers(
+    source,
+    output,
+    size=1000,
+    patterns=2,
+    center_title=True,
+    embed=False,
+    color_mode="plasma",
+    seed=None,
+    cancel_event=None,
+):
     color_mode = normalize_color_mode(color_mode)
     source_path = Path(source).resolve()
     output_root = Path(output).resolve()
@@ -1140,12 +1770,23 @@ def make_covers(source, output, size=1000, patterns=2, center_title=True, embed=
         return
 
     for index, audio_path in enumerate(files, start=1):
+        check_cancelled(cancel_event)
         target = output_root / f"{clean_stem(audio_path)}_cover_{size}.png"
         print(f"[{index}/{len(files)}] Cover: {audio_path.name}")
         file_seed = None if seed is None else int(seed) + index - 1
-        cover_path = make_cover(audio_path, target, size=size, patterns=patterns, center_title=center_title, color_mode=color_mode, seed=file_seed)
+        cover_path = make_cover(
+            audio_path,
+            target,
+            size=size,
+            patterns=patterns,
+            center_title=center_title,
+            color_mode=color_mode,
+            seed=file_seed,
+            cancel_event=cancel_event,
+        )
         if embed:
             embed_cover(audio_path, cover_path)
+    check_cancelled(cancel_event)
 
 
 def main():

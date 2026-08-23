@@ -1,4 +1,5 @@
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -69,6 +70,11 @@ def run(command):
         errors="replace",
         **SUBPROCESS_STARTUP_KWARGS,
     )
+
+
+def check_cancelled(cancel_event):
+    if cancel_event is not None and cancel_event.is_set():
+        raise InterruptedError("Processing was cancelled.")
 
 
 def audio_files(source):
@@ -301,6 +307,36 @@ def read_existing_genre(audio_path):
     return ""
 
 
+def read_all_metadata(audio_path):
+    command = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format_tags",
+        "-of",
+        "json",
+        str(audio_path),
+    ]
+    result = subprocess.run(
+        command,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        **SUBPROCESS_STARTUP_KWARGS,
+    )
+    data = json.loads(result.stdout or "{}")
+    tags = data.get("format", {}).get("tags", {})
+    return {
+        str(key).strip().lower(): str(value).strip()
+        for key, value in tags.items()
+        if str(key).strip()
+    }
+
+
 def normalized_extra_metadata(extra_metadata=None):
     if not extra_metadata:
         return {}
@@ -311,14 +347,22 @@ def normalized_extra_metadata(extra_metadata=None):
     }
 
 
-def write_metadata(audio_path, title, genre, dry_run=False, extra_metadata=None):
+def write_metadata(
+    audio_path,
+    title,
+    genre,
+    dry_run=False,
+    extra_metadata=None,
+    overwrite_all_metadata=False,
+):
     audio_path = Path(audio_path)
     temp_path = audio_path.with_name(f"{audio_path.stem}.metadata_tmp{audio_path.suffix}")
     extra_metadata = normalized_extra_metadata(extra_metadata)
     if dry_run:
         extras = ", ".join(f"{key}={value!r}" for key, value in extra_metadata.items())
         extras_text = f", {extras}" if extras else ""
-        print(f"Dry run: {audio_path.name} -> title={title!r}, genre={genre!r}{extras_text}")
+        mode = "replace all metadata" if overwrite_all_metadata else "preserve other metadata"
+        print(f"Dry run: {audio_path.name} -> title={title!r}, genre={genre!r}{extras_text} ({mode})")
         return
 
     command = [
@@ -332,12 +376,16 @@ def write_metadata(audio_path, title, genre, dry_run=False, extra_metadata=None)
         "-c",
         "copy",
         "-map_metadata",
-        "-1",
+        "-1" if overwrite_all_metadata else "0",
         "-metadata",
         f"title={title}",
         "-metadata",
         f"genre={genre}",
     ]
+    if overwrite_all_metadata:
+        command.extend(
+            ["-map_metadata:s", "-1", "-map_chapters", "-1", "-fflags", "+bitexact"]
+        )
     for key, value in extra_metadata.items():
         command.extend(["-metadata", f"{key}={value}"])
     if audio_path.suffix.lower() == ".mp3":
@@ -345,6 +393,52 @@ def write_metadata(audio_path, title, genre, dry_run=False, extra_metadata=None)
     command.append(str(temp_path))
     run(command)
     temp_path.replace(audio_path)
+
+
+def clear_metadata(audio_path, dry_run=False):
+    audio_path = Path(audio_path)
+    if dry_run:
+        print(f"Dry run: clear all metadata from {audio_path.name}")
+        return
+
+    temp_path = audio_path.with_name(f"{audio_path.stem}.metadata_tmp{audio_path.suffix}")
+    command = [
+        "ffmpeg",
+        "-hide_banner",
+        "-y",
+        "-i",
+        str(audio_path),
+        "-map",
+        "0",
+        "-c",
+        "copy",
+        "-map_metadata",
+        "-1",
+        "-map_metadata:s",
+        "-1",
+        "-map_chapters",
+        "-1",
+        "-fflags",
+        "+bitexact",
+    ]
+    if audio_path.suffix.lower() == ".mp3":
+        command.extend(["-id3v2_version", "3"])
+    command.append(str(temp_path))
+    run(command)
+    temp_path.replace(audio_path)
+
+
+def clear_music_metadata(source, dry_run=False, cancel_event=None):
+    source_path = Path(source).resolve()
+    files = audio_files(source_path)
+    if not files:
+        raise RuntimeError(f"No supported audio files found in {source_path}")
+    for index, audio_path in enumerate(files, start=1):
+        check_cancelled(cancel_event)
+        print(f"[{index}/{len(files)}] Clear metadata: {audio_path.name}")
+        clear_metadata(audio_path, dry_run=dry_run)
+    check_cancelled(cancel_event)
+    print("Metadata cleanup finished.")
 
 
 def choose_files_interactively(files):
@@ -396,7 +490,20 @@ def choose_genre_interactively(audio_path, allowed_genres, suggested_genre):
         return answer
 
 
-def update_music_metadata(source, genres=None, genres_file=None, dry_run=False, manual=False, select=False, genre_override=None, overwrite_genre=False, extra_metadata=None):
+def update_music_metadata(
+    source,
+    genres=None,
+    genres_file=None,
+    dry_run=False,
+    manual=False,
+    select=False,
+    genre_override=None,
+    overwrite_genre=False,
+    extra_metadata=None,
+    overwrite_all_metadata=False,
+    title_override=None,
+    cancel_event=None,
+):
     source_path = Path(source).resolve()
     files = audio_files(source_path)
     allowed_genres = load_genres(genres, genres_file)
@@ -415,9 +522,16 @@ def update_music_metadata(source, genres=None, genres_file=None, dry_run=False, 
 
     print(f"Allowed genres: {', '.join(allowed_genres)}")
     for index, audio_path in enumerate(files, start=1):
-        title = clean_stem(audio_path)
+        check_cancelled(cancel_event)
+        existing_tags = read_all_metadata(audio_path)
+        if title_override:
+            title = str(title_override).strip()
+        elif not overwrite_all_metadata and existing_tags.get("title"):
+            title = existing_tags["title"]
+        else:
+            title = clean_stem(audio_path)
         existing_genre = read_existing_genre(audio_path)
-        if existing_genre and not overwrite_genre:
+        if existing_genre and not overwrite_genre and not overwrite_all_metadata:
             genre = existing_genre
             action = "keep existing genre"
         else:
@@ -434,8 +548,16 @@ def update_music_metadata(source, genres=None, genres_file=None, dry_run=False, 
         extras = ", ".join(f"{key}={value!r}" for key, value in extra_metadata.items())
         extras_text = f", {extras}" if extras else ""
         print(f"[{index}/{len(files)}] Metadata: {audio_path.name} -> title={title!r}, genre={genre!r}{extras_text} ({action})")
-        write_metadata(audio_path, title, genre, dry_run=dry_run, extra_metadata=extra_metadata)
+        write_metadata(
+            audio_path,
+            title,
+            genre,
+            dry_run=dry_run,
+            extra_metadata=extra_metadata,
+            overwrite_all_metadata=overwrite_all_metadata,
+        )
 
+    check_cancelled(cancel_event)
     print("Metadata update finished.")
 
 
@@ -456,6 +578,7 @@ def main():
     parser.add_argument("--select", action="store_true", help="Choose song numbers from the source folder before writing metadata.")
     parser.add_argument("--dry-run", action="store_true", help="Show changes without modifying audio files.")
     parser.add_argument("--overwrite-genre", action="store_true", help="Replace an existing genre tag. Without this, existing genre is preserved.")
+    parser.add_argument("--overwrite-all-metadata", action="store_true", help="Clear existing metadata before writing the selected fields.")
     args = parser.parse_args()
 
     require_ffmpeg()
@@ -468,6 +591,7 @@ def main():
         select=args.select,
         genre_override=args.genre,
         overwrite_genre=args.overwrite_genre,
+        overwrite_all_metadata=args.overwrite_all_metadata,
         extra_metadata={
             "artist": args.artist,
             "album": args.album,

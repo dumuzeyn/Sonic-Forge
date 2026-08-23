@@ -5,7 +5,11 @@ a = Analysis(
     ['music_polisher_gui.py'],
     pathex=[],
     binaries=[('C:\\ffmpeg\\bin\\ffmpeg.exe', 'ffmpeg'), ('C:\\ffmpeg\\bin\\ffprobe.exe', 'ffmpeg')],
-    datas=[('Normalize-Music.py', '.'), ('assets\\sonic_forge_mark.ico', 'assets'), ('assets\\sonic_forge_mark.png', 'assets')],
+    datas=[
+        ('Normalize-Music.py', '.'),
+        ('assets\\sonic_forge_mark.ico', 'assets'),
+        ('assets\\sonic_forge_mark.png', 'assets'),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

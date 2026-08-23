@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 import shutil
 import subprocess
 import sys
@@ -31,6 +32,11 @@ def run(command, **kwargs):
         **SUBPROCESS_STARTUP_KWARGS,
         **kwargs,
     )
+
+
+def check_cancelled(cancel_event):
+    if cancel_event is not None and cancel_event.is_set():
+        raise InterruptedError("Processing was cancelled.")
 
 
 def audio_files(source_root):
@@ -89,14 +95,114 @@ def output_path_for(source_root, output_root, audio_path):
     return output_root / relative.with_suffix(".mp3")
 
 
-def normalize_file(audio_path, target_path, stats, integrated_lufs, true_peak, lra, final_gain, denoise=True, denoise_strength=4.0, limiter=True):
+def probe_duration(audio_path):
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(audio_path),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        **SUBPROCESS_STARTUP_KWARGS,
+    )
+    try:
+        return max(0.0, float(result.stdout.strip()))
+    except ValueError:
+        return 0.0
+
+
+def normalize_file(
+    audio_path,
+    target_path,
+    stats,
+    integrated_lufs,
+    true_peak,
+    lra,
+    final_gain,
+    denoise=True,
+    denoise_strength=4.0,
+    limiter=True,
+    bass_gain=0.0,
+    mid_gain=0.0,
+    treble_gain=0.0,
+    highpass_hz=20.0,
+    lowpass_hz=20000.0,
+    stereo_width=1.0,
+    compressor=False,
+    compressor_threshold=-18.0,
+    compressor_ratio=3.0,
+    compressor_attack=20.0,
+    compressor_release=250.0,
+    compressor_makeup=0.0,
+    pitch_semitones=0.0,
+    playback_speed=1.0,
+    reverb_mix=0.0,
+    fade_in=0.0,
+    fade_out=0.0,
+    cancel_event=None,
+):
+    check_cancelled(cancel_event)
     target_i = format_float(integrated_lufs)
     target_tp = format_float(true_peak)
     target_lra = format_float(lra)
     final_gain_text = format_float(final_gain)
     filters = []
+    if highpass_hz >= 20:
+        filters.append(f"highpass=f={format_float(highpass_hz)}")
+    if 1000 <= lowpass_hz < 22000:
+        filters.append(f"lowpass=f={format_float(lowpass_hz)}")
     if denoise and denoise_strength > 0:
         filters.append(f"afftdn=nr={format_float(denoise_strength)}:nf=-70")
+    if abs(bass_gain) > 1e-6:
+        filters.append(f"bass=g={format_float(bass_gain)}:f=110:w=0.65")
+    if abs(mid_gain) > 1e-6:
+        filters.append(
+            f"equalizer=f=1100:t=q:w=0.85:g={format_float(mid_gain)}"
+        )
+    if abs(treble_gain) > 1e-6:
+        filters.append(f"treble=g={format_float(treble_gain)}:f=7200:w=0.65")
+    if abs(stereo_width - 1.0) > 1e-6:
+        filters.append(f"extrastereo=m={format_float(stereo_width)}:c=1")
+    if compressor:
+        threshold = math.pow(10.0, compressor_threshold / 20.0)
+        makeup = math.pow(10.0, compressor_makeup / 20.0)
+        filters.append(
+            "acompressor="
+            f"threshold={format_float(threshold)}:"
+            f"ratio={format_float(compressor_ratio)}:"
+            f"attack={format_float(compressor_attack)}:"
+            f"release={format_float(compressor_release)}:"
+            f"makeup={format_float(makeup)}:"
+            "knee=2.828:link=average:detection=rms"
+        )
+    pitch_ratio = math.pow(2.0, pitch_semitones / 12.0)
+    if abs(pitch_semitones) > 1e-6:
+        filters.extend(
+            [
+                "aresample=48000",
+                f"asetrate={format_float(48000 * pitch_ratio)}",
+                "aresample=48000",
+                f"atempo={format_float(1.0 / pitch_ratio)}",
+            ]
+        )
+    if abs(playback_speed - 1.0) > 1e-6:
+        filters.append(f"atempo={format_float(playback_speed)}")
+    if reverb_mix > 0:
+        decay = min(0.75, 0.08 + reverb_mix * 0.62)
+        filters.append(
+            "aecho="
+            f"0.8:{format_float(0.72 + reverb_mix * 0.18)}:"
+            f"55|110:{format_float(decay)}|{format_float(decay * 0.68)}"
+        )
     filters.append(
         f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}:"
         f"measured_I={stats['input_i']}:"
@@ -109,7 +215,18 @@ def normalize_file(audio_path, target_path, stats, integrated_lufs, true_peak, l
     if final_gain and abs(final_gain - 1.0) > 1e-6:
         filters.append(f"volume={final_gain_text}")
     if limiter:
-        filters.append("alimiter=limit=0.95:attack=5:release=80")
+        limiter_level = min(0.99, math.pow(10.0, true_peak / 20.0))
+        filters.append(
+            f"alimiter=limit={format_float(limiter_level)}:attack=5:release=80"
+        )
+    duration = probe_duration(audio_path) / max(playback_speed, 0.01)
+    if fade_in > 0:
+        filters.append(f"afade=t=in:st=0:d={format_float(fade_in)}")
+    if fade_out > 0 and duration > fade_out:
+        filters.append(
+            f"afade=t=out:st={format_float(duration - fade_out)}:"
+            f"d={format_float(fade_out)}"
+        )
     second_pass_filter = ",".join(filters)
 
     run(
@@ -139,9 +256,38 @@ def normalize_file(audio_path, target_path, stats, integrated_lufs, true_peak, l
             str(target_path),
         ]
     )
+    check_cancelled(cancel_event)
 
 
-def normalize_music(source, output=None, integrated_lufs=-14.0, true_peak=-1.5, lra=11.0, final_gain=1.15, denoise=True, denoise_strength=4.0, limiter=True):
+def normalize_music(
+    source,
+    output=None,
+    integrated_lufs=-14.0,
+    true_peak=-1.5,
+    lra=11.0,
+    final_gain=1.15,
+    denoise=True,
+    denoise_strength=4.0,
+    limiter=True,
+    bass_gain=0.0,
+    mid_gain=0.0,
+    treble_gain=0.0,
+    highpass_hz=20.0,
+    lowpass_hz=20000.0,
+    stereo_width=1.0,
+    compressor=False,
+    compressor_threshold=-18.0,
+    compressor_ratio=3.0,
+    compressor_attack=20.0,
+    compressor_release=250.0,
+    compressor_makeup=0.0,
+    pitch_semitones=0.0,
+    playback_speed=1.0,
+    reverb_mix=0.0,
+    fade_in=0.0,
+    fade_out=0.0,
+    cancel_event=None,
+):
     require_ffmpeg()
 
     source_root = Path(source) if source else default_music_folder()
@@ -164,6 +310,7 @@ def normalize_music(source, output=None, integrated_lufs=-14.0, true_peak=-1.5, 
 
     total = len(files)
     for index, audio_path in enumerate(files, start=1):
+        check_cancelled(cancel_event)
         relative = audio_path.relative_to(source_base)
         target_path = output_path_for(source_base, output_root, audio_path)
         target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -176,9 +323,11 @@ def normalize_music(source, output=None, integrated_lufs=-14.0, true_peak=-1.5, 
         try:
             stats = loudnorm_stats(audio_path, integrated_lufs, true_peak, lra)
         except Exception as exc:
+            check_cancelled(cancel_event)
             print(f"Warning: Could not analyze loudness, skipping: {relative} ({exc})", file=sys.stderr)
             continue
 
+        check_cancelled(cancel_event)
         print(f"[{index}/{total}] Normalize: {relative}")
         try:
             normalize_file(
@@ -192,12 +341,32 @@ def normalize_music(source, output=None, integrated_lufs=-14.0, true_peak=-1.5, 
                 denoise=denoise,
                 denoise_strength=denoise_strength,
                 limiter=limiter,
+                bass_gain=bass_gain,
+                mid_gain=mid_gain,
+                treble_gain=treble_gain,
+                highpass_hz=highpass_hz,
+                lowpass_hz=lowpass_hz,
+                stereo_width=stereo_width,
+                compressor=compressor,
+                compressor_threshold=compressor_threshold,
+                compressor_ratio=compressor_ratio,
+                compressor_attack=compressor_attack,
+                compressor_release=compressor_release,
+                compressor_makeup=compressor_makeup,
+                pitch_semitones=pitch_semitones,
+                playback_speed=playback_speed,
+                reverb_mix=reverb_mix,
+                fade_in=fade_in,
+                fade_out=fade_out,
+                cancel_event=cancel_event,
             )
         except subprocess.CalledProcessError:
             if target_path.exists():
                 target_path.unlink()
+            check_cancelled(cancel_event)
             print(f"Warning: Failed: {relative}", file=sys.stderr)
 
+    check_cancelled(cancel_event)
     print(f"Done. Normalized files are in: {output_root}")
 
 
@@ -214,6 +383,23 @@ def main():
     parser.add_argument("--denoise-strength", "--DenoiseStrength", type=float, default=4.0, help="Gentle denoise amount in dB. Keep low to avoid damaging music.")
     parser.add_argument("--limiter", dest="limiter", action="store_true", default=True, help="Apply limiter after gain. Enabled by default.")
     parser.add_argument("--no-limiter", dest="limiter", action="store_false", help="Disable final limiter.")
+    parser.add_argument("--bass-gain", type=float, default=0.0)
+    parser.add_argument("--mid-gain", type=float, default=0.0)
+    parser.add_argument("--treble-gain", type=float, default=0.0)
+    parser.add_argument("--highpass-hz", type=float, default=20.0)
+    parser.add_argument("--lowpass-hz", type=float, default=20000.0)
+    parser.add_argument("--stereo-width", type=float, default=1.0)
+    parser.add_argument("--compressor", action="store_true")
+    parser.add_argument("--compressor-threshold", type=float, default=-18.0)
+    parser.add_argument("--compressor-ratio", type=float, default=3.0)
+    parser.add_argument("--compressor-attack", type=float, default=20.0)
+    parser.add_argument("--compressor-release", type=float, default=250.0)
+    parser.add_argument("--compressor-makeup", type=float, default=0.0)
+    parser.add_argument("--pitch-semitones", type=float, default=0.0)
+    parser.add_argument("--playback-speed", type=float, default=1.0)
+    parser.add_argument("--reverb-mix", type=float, default=0.0)
+    parser.add_argument("--fade-in", type=float, default=0.0)
+    parser.add_argument("--fade-out", type=float, default=0.0)
     args = parser.parse_args()
 
     normalize_music(
@@ -226,6 +412,23 @@ def main():
         denoise=args.denoise,
         denoise_strength=args.denoise_strength,
         limiter=args.limiter,
+        bass_gain=args.bass_gain,
+        mid_gain=args.mid_gain,
+        treble_gain=args.treble_gain,
+        highpass_hz=args.highpass_hz,
+        lowpass_hz=args.lowpass_hz,
+        stereo_width=args.stereo_width,
+        compressor=args.compressor,
+        compressor_threshold=args.compressor_threshold,
+        compressor_ratio=args.compressor_ratio,
+        compressor_attack=args.compressor_attack,
+        compressor_release=args.compressor_release,
+        compressor_makeup=args.compressor_makeup,
+        pitch_semitones=args.pitch_semitones,
+        playback_speed=args.playback_speed,
+        reverb_mix=args.reverb_mix,
+        fade_in=args.fade_in,
+        fade_out=args.fade_out,
     )
 
 

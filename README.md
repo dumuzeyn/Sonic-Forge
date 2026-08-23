@@ -2,62 +2,56 @@
 
 <p align="center">
   <a href="https://github.com/dumuzeyn/Sonic-Forge/blob/main/dist/SonicForge.exe">
-    <img src="https://img.shields.io/badge/Скачать_APK-Кцзница--Звука.apk-black?style=for-the-badge" alt="Скачать APK">
+    <img src="https://img.shields.io/badge/Скачать_EXE-Кузница--Звука.exe-24272D?style=for-the-badge" alt="Скачать SonicForge.exe">
   </a>
 </p>
 
-[English version](#loleng)
+[English version](#english)
 
-Кузница Звука - настольное приложение для подготовки музыкальных файлов. Оно нормализует громкость, обновляет метаданные, создает обложки и сохраняет готовые файлы в выбранную папку только после успешного завершения всех этапов.
+Кузница Звука — настольная утилита для подготовки музыкальных файлов. Она обрабатывает одну песню или папку, нормализует звук, изменяет метаданные, создаёт обложки и публикует готовый результат только после успешного завершения выбранных этапов.
 
-## Что умеет приложение
+## Возможности
 
-- Обрабатывает один аудиофайл или всю папку с песнями.
-- Нормализует громкость через FFmpeg loudnorm.
-- Может мягко снижать фоновый шум.
-- Записывает название и жанр в метаданные.
-- Может принудительно заменить существующий жанр.
-- Создает обложку в одном из четырех режимов: `ocean`, `plasma`, `fusion`, `aurora`.
-- Может встроить созданную обложку в MP3-файл.
-- Работает через графический интерфейс на русском и английском языках.
+- Нормализация громкости через FFmpeg loudnorm, шумоподавление и лимитер.
+- Эквалайзер, частотные срезы, ширина стерео, компрессор и дополнительные звуковые эффекты.
+- Чтение, редактирование, полная перезапись или очистка метаданных в выходной копии.
+- Автоматическое определение жанра и принудительная замена существующего жанра.
+- Генерация обложек в режимах `ocean`, `plasma`, `fusion` и `aurora`.
+- Настраиваемые размер, детализация и Seed; встраивание обложки в MP3.
+- Независимый выбор этапов: звук, метаданные и обложка.
+- Остановка обработки без публикации незавершённых файлов.
+- Русский и английский интерфейс, журнал операций и встроенные FFmpeg/FFprobe.
+
+## Интерфейс
+
+Источник и папка назначения всегда видны сверху. Остальные настройки разделены на четыре одинаковые вкладки, которые не меняют размер при переключении:
+
+1. **Источник и результат** — выбор отдельного файла или папки и каталога назначения.
+2. **Метаданные** — основные теги, чтение существующих значений и дополнительные поля.
+3. **Звук** — нормализация, очистка, защита и отдельное окно дополнительных настроек.
+4. **Обложка** — режим, Seed, размер, детализация и параметры встраивания.
+5. **Выполнение** — выбор этапов, запуск, остановка, индикатор и журнал обработки.
+
+Флажок **Не менять обложку** отключает связанные параметры, но не скрывает их. При отключённом шумоподавлении поле его силы также становится недоступным.
 
 ## Скачать и запустить
 
-Готовая сборка содержит FFmpeg и FFprobe внутри. Для обычного запуска достаточно скачать один файл:
+Готовая сборка содержит FFmpeg и FFprobe. Для запуска достаточно одного файла:
 
 [Скачать SonicForge.exe](https://github.com/dumuzeyn/Sonic-Forge/blob/main/dist/SonicForge.exe)
-
-Запуск из PowerShell:
 
 ```powershell
 .\dist\SonicForge.exe
 ```
 
-Если `.exe` еще не собран, соберите его командой:
+Сборка из исходников:
 
 ```powershell
-python -m PyInstaller --noconfirm --clean --onefile --windowed --name SonicForge --icon ".\assets\sonic_forge_mark.ico" --add-data "Normalize-Music.py;." --add-data "assets\sonic_forge_mark.ico;assets" --add-data "assets\sonic_forge_mark.png;assets" --add-binary "C:\ffmpeg\bin\ffmpeg.exe;ffmpeg" --add-binary "C:\ffmpeg\bin\ffprobe.exe;ffmpeg" music_polisher_gui.py
+pip install numpy pillow psutil pyinstaller
+python -m PyInstaller --noconfirm --clean .\SonicForge.spec
 ```
 
-## Основные настройки
-
-- **Источник** - один аудиофайл или папка с песнями.
-- **Папка назначения** - место, куда попадут готовые файлы. Во время обработки папка не изменяется.
-- **Жанр** - жанр, который будет записан в метаданные. Если поле пустое, приложение попробует определить жанр автоматически.
-- **Исполнитель, альбом, исполнитель альбома, композитор, год, номер трека, комментарий** - дополнительные метаданные. Если поле пустое, оно остается пустым.
-- **Заменить существующий жанр** - принудительно заменяет жанр, который уже есть в файле.
-- **Средняя громкость LUFS** - целевая средняя громкость трека.
-- **Пиковый предел** - максимальный пик громкости после обработки.
-- **Диапазон громкости** - степень сохранения динамики трека.
-- **Финальное усиление** - дополнительное усиление после нормализации.
-- **Шумоподавление** - мягкое снижение фонового шума.
-- **Лимитер** - защита от перегруза после усиления.
-- **Цветовая схема** - стиль обложки: `ocean`, `plasma`, `fusion`, `aurora`.
-- **Seed** - число для повторяемой генерации обложек.
-- **Не менять обложку** - пропускает создание и встраивание новой обложки.
-- **Файл приложения** - `SonicForge.exe` уже содержит FFmpeg и FFprobe, поэтому отдельная установка FFmpeg для обычного запуска не требуется.
-
-## Консольный запуск
+## Примеры команд
 
 Одна песня:
 
@@ -65,117 +59,79 @@ python -m PyInstaller --noconfirm --clean --onefile --windowed --name SonicForge
 python .\easy_music_process.py --source "C:\Music\Input\song.mp3" --output "C:\Music\Output" --color-mode plasma
 ```
 
-Папка с песнями:
+Папка:
 
 ```powershell
 python .\easy_music_process.py --source "C:\Music\Input" --output "C:\Music\Output" --color-mode plasma
 ```
 
-Папка с песнями и принудительной заменой жанра:
+Папка с принудительной заменой жанра:
 
 ```powershell
 python .\easy_music_process.py --source "C:\Music\Input" --output "C:\Music\Output" --genre "Rock" --overwrite-genre --color-mode plasma
 ```
 
-## Требования
+## Иконка
 
-Python-пакеты для запуска из исходников:
+Монограмма `SF` создана в редакторе UZYRO по исходному силуэту. Редактируемый многослойный исходник находится в `assets/SonicForgeIcon.prdx`; PNG и многоразмерный ICO экспортированы из этого проекта. В знаке нет звуковой волны, внешней рамки или скруглённого контейнера.
 
-```powershell
-pip install numpy pillow pyinstaller
-```
+> **Автор проекта: Зейналов У.Р.о.**
 
-Для собранного `.exe` FFmpeg устанавливать отдельно не нужно. Он встроен в файл приложения.
-
->**Автор проекта: Зейналов У.Р.о.**
 ---
-<h1 id = loleng>
- Sonic Forge
-</h1>
+
+<h1 id="english">Sonic Forge</h1>
 
 <p align="center">
   <a href="https://github.com/dumuzeyn/Sonic-Forge/blob/main/dist/SonicForge.exe">
-    <img src="https://img.shields.io/badge/Download_APK-Sonic--Forge.apk-black?style=for-the-badge" alt="Скачать APK">
+    <img src="https://img.shields.io/badge/Download_EXE-Sonic--Forge.exe-24272D?style=for-the-badge" alt="Download SonicForge.exe">
   </a>
 </p>
 
-Sonic Forge is a desktop application for preparing music files. It normalizes loudness, updates metadata, generates cover art, and publishes finished files to the selected output folder only after every processing step succeeds.
+Sonic Forge is a desktop utility for preparing music files. It processes a single song or a folder, normalizes audio, edits metadata, creates cover art, and publishes finished files only after the selected stages complete successfully.
 
 ## Features
 
-- Processes a single audio file or a folder of songs.
-- Normalizes loudness with FFmpeg loudnorm.
-- Can gently reduce background noise.
-- Writes title and genre metadata.
-- Can force-replace existing genres.
-- Generates cover art in one of four modes: `ocean`, `plasma`, `fusion`, `aurora`.
-- Can embed generated cover art into MP3 files.
-- Provides a graphical interface in Russian and English.
+- FFmpeg loudnorm normalization, denoise, and limiter.
+- Equalizer, frequency cutoffs, stereo width, compressor, and additional effects.
+- Read, edit, fully replace, or clear metadata in the output copy.
+- Automatic genre estimation and forced replacement of existing genres.
+- Cover generation in `ocean`, `plasma`, `fusion`, and `aurora` modes.
+- Configurable size, detail, Seed, and MP3 cover embedding.
+- Independent audio, metadata, and cover processing stages.
+- Safe cancellation without publishing incomplete files.
+- Russian and English UI, an integrated processing log, and bundled FFmpeg/FFprobe.
+
+## Interface
+
+Source and destination remain visible at the top. Metadata, audio, cover art, and processing are separated into four equal tabs whose size does not change when selected. Additional audio and metadata fields open in compact dialogs.
+
+**Do not change cover** disables related controls without hiding them. Disabling denoise also disables its strength field.
 
 ## Download And Launch
 
-The ready build includes FFmpeg and FFprobe. For normal use, downloading one file is enough:
-
 [Download SonicForge.exe](https://github.com/dumuzeyn/Sonic-Forge/blob/main/dist/SonicForge.exe)
-
-PowerShell launch:
 
 ```powershell
 .\dist\SonicForge.exe
 ```
 
-If the `.exe` has not been built yet, build it with:
+Build from source:
 
 ```powershell
-python -m PyInstaller --noconfirm --clean --onefile --windowed --name SonicForge --icon ".\assets\sonic_forge_mark.ico" --add-data "Normalize-Music.py;." --add-data "assets\sonic_forge_mark.ico;assets" --add-data "assets\sonic_forge_mark.png;assets" --add-binary "C:\ffmpeg\bin\ffmpeg.exe;ffmpeg" --add-binary "C:\ffmpeg\bin\ffprobe.exe;ffmpeg" music_polisher_gui.py
+pip install numpy pillow psutil pyinstaller
+python -m PyInstaller --noconfirm --clean .\SonicForge.spec
 ```
 
-## Main Settings
-
-- **Source** - one audio file or a folder containing songs.
-- **Output folder** - where finished files are published. The folder is not changed while processing is still running.
-- **Genre** - genre written to metadata. Leave empty to let the application estimate it.
-- **Artist, album, album artist, composer, year, track number, comment** - additional metadata fields. Empty fields remain empty.
-- **Overwrite existing genre** - replaces genres already stored in files.
-- **Integrated LUFS** - target average loudness.
-- **True peak** - maximum loudness peak after processing.
-- **Loudness range** - how much dynamic range should be preserved.
-- **Final gain** - additional gain after normalization.
-- **Denoise** - gentle background-noise reduction.
-- **Limiter** - protection from overload after gain.
-- **Color mode** - cover style: `ocean`, `plasma`, `fusion`, `aurora`.
-- **Seed** - integer for repeatable cover generation.
-- **Do not change cover** - skips generating and embedding new cover art.
-- **Application file** - `SonicForge.exe` already includes FFmpeg and FFprobe, so a separate FFmpeg installation is not required for normal use.
-
-## Console Usage
-
-Single song:
+## Command Examples
 
 ```powershell
 python .\easy_music_process.py --source "C:\Music\Input\song.mp3" --output "C:\Music\Output" --color-mode plasma
-```
-
-Folder:
-
-```powershell
 python .\easy_music_process.py --source "C:\Music\Input" --output "C:\Music\Output" --color-mode plasma
-```
-
-Folder with forced genre replacement:
-
-```powershell
 python .\easy_music_process.py --source "C:\Music\Input" --output "C:\Music\Output" --genre "Rock" --overwrite-genre --color-mode plasma
 ```
 
-## Requirements
+## Icon
 
-Python packages for source runs:
+The `SF` monogram was traced from the supplied silhouette in UZYRO. Its editable layered source is `assets/SonicForgeIcon.prdx`; the PNG and multi-size ICO are exported from that project. The mark has no waveform, outer border, or rounded container.
 
-```powershell
-pip install numpy pillow pyinstaller
-```
-
-The built `.exe` does not require a separate FFmpeg installation. FFmpeg is bundled into the application file.
-
->**Author of project: Zeynalov U.R.o.**
+> **Project author: Zeynalov U.R.o.**
