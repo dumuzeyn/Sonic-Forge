@@ -45,6 +45,7 @@ a = Analysis(
         'nbformat',
         'pandas',
         'pytest',
+        'scipy',
         'tensorflow',
         'torchaudio',
     ],

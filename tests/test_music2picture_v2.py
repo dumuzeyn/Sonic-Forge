@@ -55,6 +55,10 @@ class StubPipeline:
 
 
 class Music2PictureV2Tests(unittest.TestCase):
+    def test_audio_analysis_does_not_require_scipy(self):
+        source = (Path(music2picture_v2.__file__).parent / "audio_analysis.py").read_text(encoding="utf-8")
+        self.assertNotIn("scipy", source.lower())
+
     def test_ai_and_music2picture_are_separate_engines(self):
         self.assertEqual(music2picture.COVER_ENGINES, ("ai", "music2picture_v2"))
         self.assertFalse(hasattr(music2picture_v2, "MODES"))

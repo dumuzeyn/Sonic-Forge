@@ -6,8 +6,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from scipy.ndimage import median_filter
-from scipy.signal import find_peaks
 
 from .models import AudioAnalysis
 from .utils import EPSILON, audio_fingerprint, clamp, resample_curve, robust_scale, scale, smooth
@@ -90,7 +88,7 @@ def analyze_audio_array(audio: np.ndarray, sample_rate: int = DEFAULT_SAMPLE_RAT
     onset_curve = smooth(spectral_flux_curve * 3.2 + rms_attack * 0.9, passes=1)
     onset_threshold = float(np.median(onset_curve) + np.subtract(*np.percentile(onset_curve, (75, 25))) * 0.75)
     minimum_distance = max(1, round((sample_rate / hop) * 0.10))
-    onset_peaks, _ = find_peaks(onset_curve, height=max(onset_threshold, 0.012), distance=minimum_distance)
+    onset_peaks = _find_peaks(onset_curve, height=max(onset_threshold, 0.012), distance=minimum_distance)
     onset_density = len(onset_peaks) / max(duration, 1e-6)
     tempo, tempo_confidence = _tempo(onset_curve, sample_rate / hop)
     if len(onset_peaks) < 3:
@@ -272,8 +270,8 @@ def _chord_change(chroma: np.ndarray) -> float:
 
 def _harmonic_percussive_ratio(magnitude: np.ndarray) -> tuple[float, float]:
     reduced = magnitude[::4]
-    harmonic = median_filter(reduced, size=(1, 9), mode="nearest")
-    percussive = median_filter(reduced, size=(9, 1), mode="nearest")
+    harmonic = _median_filter_axis(reduced, window=9, axis=1)
+    percussive = _median_filter_axis(reduced, window=9, axis=0)
     harmonic_energy = float(np.sum(harmonic))
     percussive_energy = float(np.sum(percussive))
     total = harmonic_energy + percussive_energy + EPSILON
@@ -285,7 +283,7 @@ def _structure(relative_rms, flux, bass, onset):
     curve = np.clip(resample_curve(local, 64), 0.0, 1.0)
     transitions = np.abs(np.diff(curve, prepend=curve[0]))
     threshold = float(np.median(transitions) + np.subtract(*np.percentile(transitions, (75, 25))) * 1.4)
-    peaks, properties = find_peaks(transitions, height=max(threshold, 0.045), distance=6)
+    peaks = _find_peaks(transitions, height=max(threshold, 0.045), distance=6)
     section_count = int(np.clip(peaks.size + 1, 1, 9))
     boundaries = np.concatenate(([0], peaks, [len(curve)]))
     section_means = [float(np.mean(curve[left:right])) for left, right in zip(boundaries, boundaries[1:]) if right > left]
@@ -304,3 +302,37 @@ def _structure(relative_rms, flux, bass, onset):
         float(np.mean(curve[:span])),
         float(np.mean(curve[-span:])),
     )
+
+
+def _find_peaks(values: np.ndarray, height: float, distance: int) -> np.ndarray:
+    values = np.asarray(values)
+    if values.size < 3:
+        return np.empty(0, dtype=np.int64)
+
+    candidates = np.flatnonzero(
+        (values[1:-1] > values[:-2])
+        & (values[1:-1] >= values[2:])
+        & (values[1:-1] >= height)
+    ) + 1
+    if candidates.size < 2 or distance <= 1:
+        return candidates.astype(np.int64, copy=False)
+
+    selected: list[int] = []
+    for candidate in candidates[np.argsort(values[candidates])[::-1]]:
+        index = int(candidate)
+        if all(abs(index - existing) >= distance for existing in selected):
+            selected.append(index)
+    return np.asarray(sorted(selected), dtype=np.int64)
+
+
+def _median_filter_axis(values: np.ndarray, window: int, axis: int) -> np.ndarray:
+    if window <= 1 or values.shape[axis] <= 1:
+        return values.copy()
+    window = min(window, values.shape[axis] * 2 - 1)
+    if window % 2 == 0:
+        window -= 1
+    padding = [(0, 0)] * values.ndim
+    padding[axis] = (window // 2, window // 2)
+    padded = np.pad(values, padding, mode="edge")
+    windows = np.lib.stride_tricks.sliding_window_view(padded, window, axis=axis)
+    return np.median(windows, axis=-1).astype(values.dtype, copy=False)

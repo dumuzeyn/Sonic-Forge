@@ -118,7 +118,7 @@ python -m PyInstaller --noconfirm --clean .\SonicForge.spec
 
 ## Основа проектных решений
 
-Архитектура использует собственную компактную реализацию анализа на NumPy/SciPy, но набор признаков и разделение уровней сверялись с первичными источниками:
+Архитектура использует собственную компактную реализацию анализа на NumPy, но набор признаков и разделение уровней сверялись с первичными источниками:
 
 - [Essentia: spectral, temporal, tonal and rhythm descriptors](https://essentia.upf.edu/documentation.html).
 - [DEAM: continuous valence/arousal annotations for music](https://cvml.unige.ch/databases/DEAM/).
