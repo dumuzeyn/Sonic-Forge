@@ -20,15 +20,16 @@ CODE_GENRE = None
 CODE_INTEGRATED_LUFS = -14.0
 CODE_TRUE_PEAK = -1.5
 CODE_LRA = 11.0
-CODE_FINAL_GAIN = 1.15
-CODE_DENOISE = True
+CODE_FINAL_GAIN = 1.0
+CODE_DENOISE = False
+CODE_DENOISE_MODE = "auto"
 CODE_DENOISE_STRENGTH = 4.0
 CODE_LIMITER = True
 CODE_BASS_GAIN = 0.0
 CODE_MID_GAIN = 0.0
 CODE_TREBLE_GAIN = 0.0
-CODE_HIGHPASS_HZ = 20.0
-CODE_LOWPASS_HZ = 20000.0
+CODE_HIGHPASS_HZ = 0.0
+CODE_LOWPASS_HZ = 0.0
 CODE_STEREO_WIDTH = 1.0
 CODE_COMPRESSOR = False
 CODE_COMPRESSOR_THRESHOLD = -18.0
@@ -41,6 +42,9 @@ CODE_PLAYBACK_SPEED = 1.0
 CODE_REVERB_MIX = 0.0
 CODE_FADE_IN = 0.0
 CODE_FADE_OUT = 0.0
+CODE_SAMPLE_RATE = "source"
+CODE_CHANNELS = "source"
+CODE_MP3_QUALITY = "maximum"
 CODE_OVERWRITE_GENRE = False
 CODE_OVERWRITE_ALL_METADATA = False
 CODE_EXTRA_METADATA = {}
@@ -126,15 +130,16 @@ def process_music(
     integrated_lufs=-14.0,
     true_peak=-1.5,
     lra=11.0,
-    final_gain=1.15,
-    denoise=True,
+    final_gain=1.0,
+    denoise=False,
+    denoise_mode="auto",
     denoise_strength=4.0,
     limiter=True,
     bass_gain=0.0,
     mid_gain=0.0,
     treble_gain=0.0,
-    highpass_hz=20.0,
-    lowpass_hz=20000.0,
+    highpass_hz=0.0,
+    lowpass_hz=0.0,
     stereo_width=1.0,
     compressor=False,
     compressor_threshold=-18.0,
@@ -147,6 +152,9 @@ def process_music(
     reverb_mix=0.0,
     fade_in=0.0,
     fade_out=0.0,
+    sample_rate="source",
+    channels="source",
+    mp3_quality="maximum",
     overwrite_genre=False,
     overwrite_all_metadata=False,
     extra_metadata=None,
@@ -230,6 +238,7 @@ def process_music(
                 lra=lra,
                 final_gain=final_gain,
                 denoise=denoise,
+                denoise_mode=denoise_mode,
                 denoise_strength=denoise_strength,
                 limiter=limiter,
                 bass_gain=bass_gain,
@@ -249,6 +258,9 @@ def process_music(
                 reverb_mix=reverb_mix,
                 fade_in=fade_in,
                 fade_out=fade_out,
+                sample_rate=sample_rate,
+                channels=channels,
+                mp3_quality=mp3_quality,
                 cancel_event=cancel_event,
             )
         else:
@@ -339,17 +351,18 @@ def main():
     parser.add_argument("--integrated-lufs", type=float, default=-14.0, help="Target integrated loudness.")
     parser.add_argument("--true-peak", type=float, default=-1.5, help="Target true peak.")
     parser.add_argument("--lra", type=float, default=11.0, help="Target loudness range.")
-    parser.add_argument("--final-gain", type=float, default=1.15, help="Extra gain after loudnorm. Lower than old 1.30 to avoid artifacts.")
-    parser.add_argument("--denoise", dest="denoise", action="store_true", default=True, help="Use gentle denoise. Enabled by default.")
-    parser.add_argument("--no-denoise", dest="denoise", action="store_false", help="Disable denoise.")
+    parser.add_argument("--final-gain", type=float, default=1.0, help="Expert gain after loudnorm.")
+    parser.add_argument("--denoise", dest="denoise_mode", action="store_const", const="manual")
+    parser.add_argument("--no-denoise", dest="denoise_mode", action="store_const", const="off")
+    parser.add_argument("--denoise-mode", choices=("off", "auto", "manual"), default="auto")
     parser.add_argument("--denoise-strength", type=float, default=4.0, help="Gentle denoise amount in dB.")
     parser.add_argument("--limiter", dest="limiter", action="store_true", default=True, help="Use final limiter. Enabled by default.")
     parser.add_argument("--no-limiter", dest="limiter", action="store_false", help="Disable final limiter.")
     parser.add_argument("--bass-gain", type=float, default=0.0, help="Bass EQ gain in dB.")
     parser.add_argument("--mid-gain", type=float, default=0.0, help="Mid EQ gain in dB.")
     parser.add_argument("--treble-gain", type=float, default=0.0, help="Treble EQ gain in dB.")
-    parser.add_argument("--highpass-hz", type=float, default=20.0, help="Low-frequency cutoff.")
-    parser.add_argument("--lowpass-hz", type=float, default=20000.0, help="High-frequency cutoff.")
+    parser.add_argument("--highpass-hz", type=float, default=0.0, help="Low-frequency cutoff; 0 disables it.")
+    parser.add_argument("--lowpass-hz", type=float, default=0.0, help="High-frequency cutoff; 0 disables it.")
     parser.add_argument("--stereo-width", type=float, default=1.0, help="Stereo width: 0 is mono, 1 unchanged, 2 wide.")
     parser.add_argument("--compressor", action="store_true", help="Enable dynamic compressor.")
     parser.add_argument("--compressor-threshold", type=float, default=-18.0)
@@ -362,6 +375,9 @@ def main():
     parser.add_argument("--reverb-mix", type=float, default=0.0)
     parser.add_argument("--fade-in", type=float, default=0.0)
     parser.add_argument("--fade-out", type=float, default=0.0)
+    parser.add_argument("--sample-rate", choices=("source", "44100", "48000"), default="source")
+    parser.add_argument("--channels", choices=("source", "1", "2"), default="source")
+    parser.add_argument("--mp3-quality", choices=("maximum", "high", "medium"), default="maximum")
     parser.add_argument("--overwrite-genre", action="store_true", help="Replace existing genre tags. Default keeps them.")
     parser.add_argument("--overwrite-all-metadata", action="store_true", help="Clear existing metadata before writing selected fields.")
     parser.add_argument("--cover-seed", type=int, help="Use an integer for repeatable generated covers.")
@@ -395,7 +411,8 @@ def main():
         true_peak=args.true_peak,
         lra=args.lra,
         final_gain=args.final_gain,
-        denoise=args.denoise,
+        denoise=args.denoise_mode == "manual",
+        denoise_mode=args.denoise_mode,
         denoise_strength=args.denoise_strength,
         limiter=args.limiter,
         bass_gain=args.bass_gain,
@@ -415,6 +432,9 @@ def main():
         reverb_mix=args.reverb_mix,
         fade_in=args.fade_in,
         fade_out=args.fade_out,
+        sample_rate=args.sample_rate,
+        channels=args.channels,
+        mp3_quality=args.mp3_quality,
         overwrite_genre=args.overwrite_genre,
         overwrite_all_metadata=args.overwrite_all_metadata,
         extra_metadata={
@@ -452,6 +472,7 @@ def run_from_code_settings():
         lra=CODE_LRA,
         final_gain=CODE_FINAL_GAIN,
         denoise=CODE_DENOISE,
+        denoise_mode=CODE_DENOISE_MODE,
         denoise_strength=CODE_DENOISE_STRENGTH,
         limiter=CODE_LIMITER,
         bass_gain=CODE_BASS_GAIN,
@@ -471,6 +492,9 @@ def run_from_code_settings():
         reverb_mix=CODE_REVERB_MIX,
         fade_in=CODE_FADE_IN,
         fade_out=CODE_FADE_OUT,
+        sample_rate=CODE_SAMPLE_RATE,
+        channels=CODE_CHANNELS,
+        mp3_quality=CODE_MP3_QUALITY,
         overwrite_genre=CODE_OVERWRITE_GENRE,
         overwrite_all_metadata=CODE_OVERWRITE_ALL_METADATA,
         extra_metadata=CODE_EXTRA_METADATA,

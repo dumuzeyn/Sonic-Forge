@@ -5,7 +5,7 @@ from tkinter import ttk
 import music_polisher_gui
 from lyrics_engine import LyricsResult
 from ui.model_manager_dialog import ImageModelManagerDialog
-from ui.widgets import SquareCheckbutton
+from ui.widgets import ModernScale, SquareCheckbutton
 
 
 class GuiAcceptanceTests(unittest.TestCase):
@@ -55,6 +55,17 @@ class GuiAcceptanceTests(unittest.TestCase):
         uniforms = [tab_bar.grid_columnconfigure(i)["uniform"] for i in range(5)]
         self.assertEqual(weights, [1] * 5)
         self.assertEqual(uniforms, ["tabs"] * 5)
+
+    def test_audio_page_uses_stable_custom_sliders_and_neutral_defaults(self):
+        self.app.view.show_tab("audio")
+        self.app.update_idletasks()
+        sliders = [widget for widget in _descendants(self.app.view.tab_pages["audio"]) if isinstance(widget, ModernScale)]
+        self.assertEqual(len(sliders), 5)
+        self.assertEqual(self.app.final_gain_var.get(), 1.0)
+        self.assertFalse(self.app.highpass_enabled_var.get())
+        self.assertFalse(self.app.lowpass_enabled_var.get())
+        self.assertEqual(self.app.audio_option_key("sample_rate"), "source")
+        self.assertEqual(self.app.audio_option_key("channels"), "source")
 
     def test_language_switch_updates_status_log_and_open_dialogs(self):
         self.assertTrue(self.app.lyrics_status_var.get().startswith("Текст ещё"))

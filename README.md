@@ -12,12 +12,29 @@
 
 ## Возможности
 
-- Нормализация громкости, шумоподавление, лимитер, эквалайзер, фильтры, компрессор и эффекты.
+- Понятные профили звука и макро-регуляторы с отдельным экспертным режимом.
+- Анализ записи, рекомендация обработки и выровненное по громкости сравнение «Оригинал / Результат».
+- Двухпроходная нормализация, автоматическое шумоподавление, лимитер, эквалайзер, компрессор и эффекты.
 - Просмотр, изменение, полная замена или очистка метаданных.
 - Локальное распознавание текста через `faster-whisper`, определение языка и экспорт TXT/LRC.
 - Независимые этапы **Звук**, **Метаданные**, **Текст** и **Обложка**.
 - Остановка без публикации незавершённых файлов.
-- FFmpeg встроен в EXE; длительность и метаданные читаются без запуска внешней программы.
+- FFmpeg встроен в EXE; длительность и метаданные читаются внутри приложения.
+
+## Обработка звука
+
+В обычном режиме выбирается ожидаемый результат: **Сбалансированный**, **Сохранить характер**, **Громче и плотнее**, **Чистый звук**, **Больше баса**, **Ярче и подробнее** или **Шире**. Интенсивность и четыре аккуратных регулятора позволяют уточнить громкость, характер, бас и пространство без работы с инженерными терминами.
+
+Кнопка **Анализировать** оценивает громкость, динамику, бас, высокие частоты и постоянный фоновый шум, после чего объясняет рекомендацию. **Создать сравнение** готовит характерный фрагмент; оригинал и обработанный результат воспроизводятся с одинаковой воспринимаемой громкостью.
+
+В экспертном окне отдельно находятся **Улучшение** и **Темп и эффекты**. Нейтральные настройки действительно ничего не меняют: частотные срезы выключены, финальное усиление равно `1.0`, а шумоподавление в режиме **Авто** применяется только при обнаружении заметного постоянного шума. Частота дискретизации и число каналов по умолчанию сохраняются как в источнике.
+
+Одинаковая цепочка коррекции используется перед loudnorm в обоих проходах:
+
+```text
+источник -> коррекция / эффекты -> анализ loudnorm
+источник -> та же коррекция / эффекты -> loudnorm -> защита пиков -> результат
+```
 
 ## Два движка обложек
 
@@ -147,6 +164,12 @@ MuLan и CLAP указаны как направление для будущег
 
 Sonic Forge processes one track or a folder while leaving source files unchanged. Audio, metadata, local lyrics recognition, and cover creation remain independent stages, and completed files are published only after all selected work finishes.
 
+## Audio processing
+
+The standard view offers result-oriented profiles and clean macro controls for loudness, character, bass, and stereo space. **Analyze** explains the recording's loudness, dynamics, tonal balance, and stationary noise; **Create comparison** generates loudness-matched Original and Result previews.
+
+Expert settings separate enhancement from tempo and creative effects. Both loudnorm passes use the exact same preprocessing chain. Final gain defaults to `1.0`, frequency cuts are genuinely off until enabled, automatic denoise only acts on detected stationary noise, and source sample rate and mono/stereo layout are preserved whenever MP3 supports them.
+
 ## Two cover engines
 
 **AI Cover Generation** and **Music2Picture v2** are separate user-selectable engines. Both consume the same audio-first pipeline:
@@ -168,6 +191,6 @@ Selecting a folder can generate a separate `song_description` and `visual_brief`
 
 [Download SonicForge.exe](https://github.com/dumuzeyn/Sonic-Forge/raw/refs/heads/main/dist/SonicForge.exe)
 
-FFmpeg and FFprobe are bundled. The multi-gigabyte image model remains a separate optional download managed inside the application.
+FFmpeg is bundled. The multi-gigabyte image model remains a separate optional download managed inside the application.
 
 > Project author: Zeynalov U.R.o.

@@ -4,7 +4,7 @@ from tkinter import ttk
 from PIL import Image, ImageTk
 
 from .theme import COLORS, FONTS, SPACING, SIZES
-from .widgets import SquareCheckbutton, ToolTip
+from .widgets import ModernScale, SquareCheckbutton, ToolTip
 
 
 class SonicForgeView(ttk.Frame):
@@ -232,87 +232,123 @@ class SonicForgeView(ttk.Frame):
 
     def _build_audio(self, parent):
         frame = self._section(parent, "audio", 0, 0, sticky="nsew")
-        frame.columnconfigure(0, minsize=145)
-        frame.columnconfigure(1, weight=1, minsize=70)
-        frame.columnconfigure(2, minsize=135)
-        frame.columnconfigure(3, weight=1, minsize=65)
-        subtitle = self._localize(ttk.Label(frame, style="SurfaceSecondary.TLabel"), "normalization")
-        subtitle.grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, SPACING["xs"]))
-        fields = (
-            ("integrated_lufs", self.app.integrated_lufs_var, -30, -5, 0.5, "tip_integrated_lufs"),
-            ("true_peak", self.app.true_peak_var, -9, 0, 0.1, "tip_true_peak"),
-            ("lra", self.app.lra_var, 1, 20, 0.5, "tip_lra"),
-            ("final_gain", self.app.final_gain_var, 0.5, 2, 0.05, "tip_final_gain"),
-        )
-        for index, (key, variable, minimum, maximum, step, tip_key) in enumerate(fields):
-            pair = index % 2
-            base_row = 1 + index // 2
-            label_column = pair * 2
-            control_column = label_column + 1
-            label = self._localize(ttk.Label(frame, style="SurfaceSecondary.TLabel"), key)
-            label.grid(
-                row=base_row,
-                column=label_column,
-                sticky="w",
-                padx=(0 if pair == 0 else SPACING["md"], SPACING["sm"]),
-                pady=SPACING["xs"],
-            )
-            spin = ttk.Spinbox(frame, textvariable=variable, from_=minimum, to=maximum, increment=step, width=12)
-            spin.grid(
-                row=base_row,
-                column=control_column,
-                sticky="ew",
-                pady=SPACING["xs"],
-            )
-            self._tip(label, tip_key)
-            self._tip(spin, tip_key)
-        cleanup = self._localize(ttk.Label(frame, style="SurfaceSecondary.TLabel"), "cleanup")
-        cleanup.grid(row=3, column=0, columnspan=2, sticky="w", pady=(SPACING["xs"], SPACING["xs"]))
-        advanced_holder = tk.Frame(
+        frame.columnconfigure(1, weight=1)
+        frame.columnconfigure(3, weight=1)
+
+        profile_label = self._localize(ttk.Label(frame, style="SurfaceSecondary.TLabel"), "audio_profile")
+        profile_label.grid(row=0, column=0, sticky="w", padx=(0, SPACING["sm"]))
+        self.audio_profile_combo = ttk.Combobox(
             frame,
-            width=200,
-            height=SIZES["control_height"],
-            bg=COLORS["surface"],
+            textvariable=self.app.audio_profile_var,
+            values=self.app.audio_profile_values(),
+            state="readonly",
         )
-        advanced_holder.grid(
-            row=3,
-            column=2,
-            columnspan=2,
-            sticky="e",
-            pady=(SPACING["xs"], SPACING["xs"]),
-        )
-        advanced_holder.pack_propagate(False)
+        self.audio_profile_combo.grid(row=0, column=1, columnspan=2, sticky="ew")
+        self.audio_profile_combo.bind("<<ComboboxSelected>>", lambda _event: self.app.audio_profile_changed())
+        self._tip(profile_label, "tip_audio_profile")
+        self._tip(self.audio_profile_combo, "tip_audio_profile")
         advanced = self._localize(
-            ttk.Button(advanced_holder, command=self.app.show_advanced_audio),
-            "advanced_audio",
+            ttk.Button(frame, command=self.app.show_advanced_audio), "advanced_audio"
         )
-        advanced.pack(fill=tk.BOTH, expand=True)
+        advanced.grid(row=0, column=3, sticky="e", padx=(SPACING["md"], 0))
+
+        intensity_label = self._localize(ttk.Label(frame, style="SurfaceSecondary.TLabel"), "audio_intensity")
+        intensity_label.grid(row=1, column=0, sticky="w", pady=(SPACING["md"], 0))
+        intensity = ModernScale(
+            frame, from_=0, to=100, variable=self.app.audio_intensity_var,
+            command=lambda value: self.app._apply_audio_macros(),
+        )
+        intensity.grid(row=1, column=1, columnspan=3, sticky="ew", pady=(SPACING["md"], 0))
+        self._tip(intensity_label, "tip_audio_intensity")
+        self._tip(intensity, "tip_audio_intensity")
+
+        macros = ttk.Frame(frame, style="Surface.TFrame")
+        macros.grid(row=2, column=0, columnspan=4, sticky="ew", pady=(SPACING["md"], 0))
+        macros.columnconfigure(1, weight=1)
+        macros.columnconfigure(4, weight=1)
+        macro_fields = (
+            ("audio_loudness", self.app.loudness_macro_var, "audio_quieter", "audio_louder"),
+            ("audio_character", self.app.character_macro_var, "audio_softer", "audio_brighter"),
+            ("audio_bass_macro", self.app.bass_macro_var, "audio_less", "audio_more"),
+            ("audio_space", self.app.space_macro_var, "audio_narrower", "audio_wider"),
+        )
+        for index, (key, variable, left_key, right_key) in enumerate(macro_fields):
+            column = 0 if index % 2 == 0 else 3
+            row = (index // 2) * 2
+            label = self._localize(ttk.Label(macros, style="Surface.TLabel"), key)
+            label.grid(row=row, column=column, columnspan=2, sticky="w", pady=(0, 2))
+            scale = ModernScale(
+                macros,
+                from_=-100,
+                to=100,
+                variable=variable,
+                command=self.app.audio_macro_changed,
+            )
+            scale.grid(row=row + 1, column=column + 1, sticky="ew", padx=SPACING["xs"])
+            left = self._localize(ttk.Label(macros, style="SurfaceSecondary.TLabel"), left_key)
+            right = self._localize(ttk.Label(macros, style="SurfaceSecondary.TLabel"), right_key)
+            left.grid(row=row + 1, column=column, sticky="w")
+            right.grid(row=row + 1, column=column + 2, sticky="e", padx=(SPACING["xs"], SPACING["md"] if column == 0 else 0))
+
         checks = ttk.Frame(frame, style="Surface.TFrame")
-        checks.grid(row=4, column=0, columnspan=4, sticky="ew")
-        self.denoise_check = self._localize(
+        checks.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(SPACING["md"], 0))
+        self.auto_denoise_check = self._localize(
             SquareCheckbutton(
                 checks,
-                self.app.denoise_var,
-                command=self.update_dependencies,
-                fixed_width=150,
+                self.app.auto_denoise_var,
+                command=self.app.auto_denoise_changed,
+                fixed_width=260,
             ),
-            "denoise",
+            "audio_auto_denoise",
         )
-        self.denoise_check.pack(side=tk.LEFT)
-        strength_label = self._localize(ttk.Label(checks, style="SurfaceSecondary.TLabel"), "denoise_strength")
-        strength_label.pack(side=tk.LEFT, padx=(SPACING["lg"], SPACING["sm"]))
-        self.denoise_strength = ttk.Spinbox(
-            checks, textvariable=self.app.denoise_strength_var, from_=0, to=20, increment=0.5, width=7
-        )
-        self.denoise_strength.pack(side=tk.LEFT)
+        self.auto_denoise_check.pack(side=tk.LEFT)
         self.limiter_check = self._localize(
-            SquareCheckbutton(checks, self.app.limiter_var, fixed_width=90), "limiter"
+            SquareCheckbutton(checks, self.app.limiter_var, fixed_width=210), "audio_peak_protection"
         )
-        self.limiter_check.pack(side=tk.RIGHT)
-        self._tip(self.denoise_check, "tip_denoise")
-        self._tip(strength_label, "tip_denoise_strength")
-        self._tip(self.denoise_strength, "tip_denoise_strength")
-        self._tip(self.limiter_check, "tip_limiter")
+        self.limiter_check.pack(side=tk.LEFT, padx=(SPACING["md"], 0))
+
+        actions = ttk.Frame(frame, style="Surface.TFrame")
+        actions.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(SPACING["md"], 0))
+        for column in range(3):
+            actions.columnconfigure(column, weight=1, uniform="audio_actions")
+        self.audio_analyze_button = self._localize(
+            ttk.Button(actions, command=self.app.analyze_audio_settings), "audio_analyze"
+        )
+        self.audio_apply_button = self._localize(
+            ttk.Button(actions, command=self.app.apply_audio_recommendation, state="disabled"),
+            "audio_apply_recommendation",
+        )
+        self.audio_preview_button = self._localize(
+            ttk.Button(actions, command=self.app.create_audio_preview), "audio_preview"
+        )
+        self.audio_original_button = self._localize(
+            ttk.Button(actions, command=lambda: self.app.play_audio_preview(False), state="disabled"), "audio_original"
+        )
+        self.audio_processed_button = self._localize(
+            ttk.Button(actions, command=lambda: self.app.play_audio_preview(True), state="disabled"), "audio_processed"
+        )
+        self.audio_stop_button = self._localize(
+            ttk.Button(actions, command=self.app.stop_audio_preview, state="disabled"), "audio_stop"
+        )
+        for column, button in enumerate(
+            (self.audio_analyze_button, self.audio_apply_button, self.audio_preview_button)
+        ):
+            button.grid(row=0, column=column, sticky="ew", padx=(0, SPACING["sm"] if column < 2 else 0))
+        for column, button in enumerate(
+            (self.audio_original_button, self.audio_processed_button, self.audio_stop_button)
+        ):
+            button.grid(row=1, column=column, sticky="ew", padx=(0, SPACING["sm"] if column < 2 else 0), pady=(SPACING["xs"], 0))
+
+        analysis = ttk.Label(
+            frame, textvariable=self.app.audio_analysis_var, style="SurfaceSecondary.TLabel",
+            wraplength=760, justify=tk.LEFT,
+        )
+        analysis.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(SPACING["md"], 0))
+        warning = ttk.Label(
+            frame, textvariable=self.app.audio_warning_var, style="SurfaceSecondary.TLabel",
+            foreground=COLORS["danger"], wraplength=760, justify=tk.LEFT,
+        )
+        warning.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(SPACING["xs"], 0))
     def _build_cover(self, parent):
         header = ttk.Frame(parent, style="Surface.TFrame")
         self._localize(ttk.Label(header, style="Surface.TLabel", font=FONTS["section"]), "cover").pack(side=tk.LEFT, padx=(0, SPACING["lg"]))
@@ -688,7 +724,6 @@ class SonicForgeView(ttk.Frame):
         self.log.bind("<Button-3>", self._show_log_menu)
 
     def update_dependencies(self):
-        self.denoise_strength.configure(state="normal" if self.app.denoise_var.get() else "disabled")
         cover_enabled = not self.app.no_change_cover_var.get()
         state = "normal" if cover_enabled else "disabled"
         for control in self.cover_controls:
@@ -709,6 +744,7 @@ class SonicForgeView(ttk.Frame):
         self.update_dependencies()
         self.cover_detail_combo.configure(values=self.app.cover_choice_values("detail"))
         self.cover_engine_combo.configure(values=self.app.cover_choice_values("engine"))
+        self.audio_profile_combo.configure(values=self.app.audio_profile_values())
         self.log_menu.entryconfigure(0, label=self.app.t("copy"))
         self.log_menu.entryconfigure(1, label=self.app.t("select_all"))
         if self.busy:
@@ -740,6 +776,20 @@ class SonicForgeView(ttk.Frame):
         state = tk.DISABLED if busy else tk.NORMAL
         self.cover_preview_button.configure(state=state)
         self.cover_variant_button.configure(state=state)
+
+    def set_audio_preview_ready(self, ready):
+        state = tk.NORMAL if ready else tk.DISABLED
+        self.audio_original_button.configure(state=state)
+        self.audio_processed_button.configure(state=state)
+        self.audio_stop_button.configure(state=state)
+
+    def set_audio_recommendation_ready(self, ready):
+        self.audio_apply_button.configure(state=tk.NORMAL if ready else tk.DISABLED)
+
+    def set_audio_task_busy(self, busy):
+        state = tk.DISABLED if busy else tk.NORMAL
+        self.audio_analyze_button.configure(state=state)
+        self.audio_preview_button.configure(state=state)
 
     def update_engine_dependencies(self):
         is_ai = self.app.cover_choice("engine", self.app.cover_engine_var.get()) == "ai"

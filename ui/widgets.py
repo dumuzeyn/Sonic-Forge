@@ -68,6 +68,108 @@ class ToolTip:
             self.window = None
 
 
+class ModernScale(tk.Canvas):
+    def __init__(
+        self,
+        parent,
+        *,
+        from_=0,
+        to=100,
+        variable=None,
+        command=None,
+        width=120,
+        height=30,
+        surface=True,
+    ):
+        self.minimum = float(from_)
+        self.maximum = float(to)
+        self.variable = variable if variable is not None else tk.DoubleVar(value=self.minimum)
+        self.command = command
+        self.hovered = False
+        background = COLORS["surface"] if surface else COLORS["bg"]
+        super().__init__(
+            parent,
+            width=width,
+            height=height,
+            bg=background,
+            highlightthickness=0,
+            borderwidth=0,
+            takefocus=True,
+            cursor="hand2",
+        )
+        self.bind("<Configure>", self._redraw)
+        self.bind("<Button-1>", self._move)
+        self.bind("<B1-Motion>", self._move)
+        self.bind("<Enter>", self._enter)
+        self.bind("<Leave>", self._leave)
+        self.bind("<FocusIn>", self._redraw)
+        self.bind("<FocusOut>", self._redraw)
+        self.bind("<Left>", lambda _event: self._step(-1))
+        self.bind("<Right>", lambda _event: self._step(1))
+        self.bind("<Home>", lambda _event: self._set_value(self.minimum))
+        self.bind("<End>", lambda _event: self._set_value(self.maximum))
+        self.variable.trace_add("write", self._redraw)
+
+    def _geometry(self):
+        radius = 12 if self.hovered or self.focus_get() is self else 11
+        start = radius + 3
+        end = max(start + 1, self.winfo_width() - radius - 3)
+        return start, end, self.winfo_height() / 2, radius
+
+    def _redraw(self, *_args):
+        if not self.winfo_exists():
+            return
+        self.delete("all")
+        start, end, center_y, radius = self._geometry()
+        span = self.maximum - self.minimum
+        fraction = 0.0 if span == 0 else (float(self.variable.get()) - self.minimum) / span
+        fraction = max(0.0, min(1.0, fraction))
+        thumb_x = start + (end - start) * fraction
+        self.create_line(
+            start,
+            center_y,
+            end,
+            center_y,
+            fill=COLORS["accent"],
+            width=4,
+            capstyle=tk.ROUND,
+        )
+        self.create_oval(
+            thumb_x - radius,
+            center_y - radius,
+            thumb_x + radius,
+            center_y + radius,
+            fill=COLORS["accent_hover"] if self.hovered else COLORS["text"],
+            outline=COLORS["surface"],
+            width=2,
+        )
+
+    def _set_value(self, value):
+        value = max(self.minimum, min(self.maximum, float(value)))
+        self.variable.set(value)
+        if self.command is not None:
+            self.command(str(value))
+        return "break"
+
+    def _move(self, event):
+        self.focus_set()
+        start, end, _center_y, _radius = self._geometry()
+        fraction = (event.x - start) / max(1, end - start)
+        return self._set_value(self.minimum + max(0.0, min(1.0, fraction)) * (self.maximum - self.minimum))
+
+    def _step(self, direction):
+        step = (self.maximum - self.minimum) / 100.0
+        return self._set_value(float(self.variable.get()) + direction * step)
+
+    def _enter(self, _event=None):
+        self.hovered = True
+        self._redraw()
+
+    def _leave(self, _event=None):
+        self.hovered = False
+        self._redraw()
+
+
 class SquareCheckbutton(tk.Frame):
     def __init__(
         self,
