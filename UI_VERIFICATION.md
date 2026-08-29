@@ -1,59 +1,65 @@
-# Sonic Forge UI verification
+# Sonic Forge verification
 
 Date: 2026-08-23
 
-## Feature map
+## User interface
 
-| Existing feature | UI location after redesign | Verified |
+- Startup client size: approximately `911 x 674` on the verification machine, preserving a compact horizontal 4:3 shape.
+- Previous width cause: the Lyrics toolbar placed actions, format, language, and two long checkboxes in one horizontal row (`1218 px` requested width).
+- Fix: actions and options use separate compact rows; the window adds only the width needed to preserve its horizontal shape.
+- Five equal grid-weight tabs retain the same dimensions and window geometry when switched.
+- Russian primary labels are shown in full. Long explanations remain in tooltips or wrapped secondary text.
+- Processing log is read-only but supports mouse selection, `Ctrl+C`, `Ctrl+A`, scrolling, Copy/Select All context actions, Copy Log, and Clear.
+
+## Cover pipeline
+
+`SongAnalysis -> Local Lyrics -> VisualProfile -> CoverConcept -> LocalImageProvider -> Typography -> Validation`
+
+- Primary backend: `stable-diffusion.cpp`, Windows Vulkan runtime commit `97d2990`.
+- Recommended checkpoint: `DreamShaper8_LCM.safetensors` (about 2.1 GB).
+- External storage: `%LOCALAPPDATA%\SonicForge\models\image`.
+- Lazy behavior: no image runtime or model activity until a cover is requested.
+- Device selection: discrete NVIDIA/AMD/Intel Arc is preferred; parameters can remain in RAM with a VRAM budget and layer streaming.
+- Recovery: memory errors retry at 384 px on CPU; any remaining generation error activates Music2Picture.
+- Secondary engine: embedded Music2Picture v2 with one adaptive VisualDNA-driven renderer; it is also available as the AI failure path.
+- Cloud provider remains an optional architecture extension and is absent from the normal UI.
+
+## Local image acceptance
+
+The recommended model, semantic checker, and runtime were installed outside the repository. Real local generation completed successfully with the quality-oriented DreamShaper 8 model. Five 512 px acceptance covers were generated from real songs and visually inspected in `demo_covers/semantic_ai_final`. They use distinct scenes and focal metaphors: a house in grass, an open cage at sea, a broken red relic, lonely dancing shoes, and a train on diverging tracks.
+
+| File | Semantic themes | Composition |
 | --- | --- | --- |
-| Single audio file | Source and destination / File | Yes |
-| Source folder | Source and destination / Folder | Yes |
-| Output folder | Source and destination / Choose | Yes |
-| Title, artist, album, album artist | Metadata tab | Yes |
-| Composer, year, track, genre, comment | Metadata | Yes |
-| Disc, publisher, copyright, lyrics | Metadata / Actions / Additional fields | Yes |
-| Read existing metadata | Metadata / Actions / Read tags | Yes |
-| Overwrite genre | Metadata checkbox | Yes |
-| Replace all metadata | Metadata checkbox | Yes |
-| Clear all metadata | Metadata / Actions / Clear all | Yes |
-| Integrated LUFS, true peak, LRA, final gain | Audio tab / Normalization | Yes |
-| Denoise and strength | Audio processing / Cleanup and protection | Yes |
-| Limiter | Audio processing / Cleanup and protection | Yes |
-| EQ, filters, stereo width | Additional audio settings | Yes |
-| Compressor | Additional audio settings | Yes |
-| Pitch, speed, reverb, fades | Additional audio settings | Yes |
-| Ocean, plasma, fusion, aurora | Cover art tab / Color mode | Yes |
-| Seed, size, detail | Cover art | Yes |
-| Center title and embed cover | Cover art | Yes |
-| Do not change cover | Cover art header | Yes |
-| Audio, metadata, cover stages | Processing tab | Yes |
-| Run, stop, progress | Processing tab | Yes |
-| Operation log and clear action | Processing tab / Processing log | Yes |
-| RU/EN localization | Fixed header language button | Yes |
-| Ctrl+A/C/X/V/Z | All editable fields and log | Yes |
+| `01_another_love.png` | love, rain, conflict | aerial tableau / portrait |
+| `02_drive_ahead.png` | night, journey, freedom, conflict | double exposure |
+| `03_carol_bells.png` | winter night | symbolic city landscape |
+| `04_bullet_hell.png` | conflict, resistance | portrait silhouette |
+| `05_fallen_down.png` | rain, memory, nature, home | atmospheric landscape |
 
-## Checks
+The five outputs differ in scene, subject, scale, layout, atmosphere, and visual metaphor. They are not recolored procedural templates.
 
-- `python -m compileall .`: passed.
-- Module imports: passed.
-- Ruff static checks: passed.
-- Full temporary-file processing path: passed.
-- Output audio, metadata, generated PNG, and embedded MP3 cover: passed.
-- Four cover modes: passed.
-- Window sizes 1180x860, 1280x920, and 1600x1000 in RU and EN: passed.
-- Four fixed tabs: equal width and equal content area in RU and EN at 1180x860.
-- No mapped widget outside the minimum window: passed.
-- Button and checkbox geometry across RU/EN: unchanged.
-- Button geometry across hover, pressed, focus, disabled, and processing states: unchanged.
-- Denoise and cover dependency states: passed.
-- Tooltip delay and non-overlapping placement: passed.
-- UZYRO layered icon project round trip: five layers, 2048x2048, passed.
-- Icon legibility at 16, 20, 24, 32, 40, 48, 64, 96, and 128 px: passed.
-- PyInstaller one-file windowed build: passed.
-- Packaged EXE startup, resource loading, and responsive main window: passed.
-- Repository EXE and user copy SHA-256 match: passed.
+## Lyrics and Voltune
 
-## Tkinter limitations
+- Local provider: bundled `faster-whisper`, loaded only on recognition.
+- Language: provider detection plus script analysis; confidence is shown only when available.
+- Exports: same-basename UTF-8 TXT and timestamped LRC.
+- Current Voltune main `73f7012` checks `<basename>.lrc`, then `<basename>.txt`, then embedded lyrics.
+- Lyrics run before cover generation and are given semantic priority. A recognition failure is logged per song and does not prevent cover generation.
 
-- Native ttk controls do not provide arbitrary corner radii; the interface relies on spacing, alignment, restrained fills, and thin borders instead.
-- Control widths are fixed where translated labels differ, so long future translations should be reviewed before being added.
+## Automated checks
+
+- Python compilation: passed.
+- 25 unit/integration/GUI tests: passed.
+- Forced local-provider failure: passed, fallback returned an image.
+- Direct and fallback calls both use the same universal Music2Picture v2 renderer without style buckets.
+- Model manager custom-path/status test: passed.
+- Read-only journal copying test: passed.
+- Stable window geometry and equal tab layout tests: passed.
+- Lyrics batch, TXT/LRC, language analysis, semantic priority, and stage-order tests: passed.
+
+## Packaging
+
+- One-file windowed PyInstaller configuration; no terminal window.
+- FFmpeg and FFprobe bundled.
+- `faster-whisper`, CTranslate2, PyAV, ONNX Runtime, and Music2Picture fallback bundled.
+- Image runtime and checkpoint intentionally stay outside the EXE.

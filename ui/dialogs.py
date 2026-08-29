@@ -122,6 +122,11 @@ class AdvancedAudioDialog(tk.Toplevel):
         self.localized.append((close, "close"))
         close.grid(row=row, column=0, sticky="e")
 
+    def apply_language(self):
+        self.title(self.app.t("advanced_title"))
+        for widget, key in self.localized:
+            widget.configure(text=self.app.t(key))
+
 
 def app_var(app, name):
     return getattr(app, name)
@@ -138,6 +143,7 @@ class AdditionalMetadataDialog(tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
         self.app = app
+        self.localized = []
         self.title(app.t("additional_metadata_title"))
         self.configure(bg=COLORS["bg"])
         self.geometry("680x330")
@@ -154,17 +160,20 @@ class AdditionalMetadataDialog(tk.Toplevel):
             style="Surface.TLabelframe",
             padding=SPACING["lg"],
         )
+        self.localized.append((body, "additional_metadata_title"))
         body.pack(fill=tk.BOTH, expand=True, padx=SPACING["lg"], pady=SPACING["lg"])
         body.columnconfigure(0, weight=1)
         body.columnconfigure(1, weight=1)
         for index, (key, var_name) in enumerate(self.FIELDS):
             column = index % 2
             row = (index // 2) * 2
-            ttk.Label(
+            label = ttk.Label(
                 body,
                 text=self.app.t(key),
                 style="SurfaceSecondary.TLabel",
-            ).grid(
+            )
+            self.localized.append((label, key))
+            label.grid(
                 row=row,
                 column=column,
                 sticky="w",
@@ -177,9 +186,16 @@ class AdditionalMetadataDialog(tk.Toplevel):
                 padx=(0 if column == 0 else SPACING["sm"], SPACING["sm"] if column == 0 else 0),
                 pady=(SPACING["xs"], SPACING["md"]),
             )
-        ttk.Button(
+        close = ttk.Button(
             body,
             text=self.app.t("close"),
             width=SIZES["button_width"],
             command=self.destroy,
-        ).grid(row=4, column=0, columnspan=2, sticky="e", pady=(SPACING["sm"], 0))
+        )
+        self.localized.append((close, "close"))
+        close.grid(row=4, column=0, columnspan=2, sticky="e", pady=(SPACING["sm"], 0))
+
+    def apply_language(self):
+        self.title(self.app.t("additional_metadata_title"))
+        for widget, key in self.localized:
+            widget.configure(text=self.app.t(key))

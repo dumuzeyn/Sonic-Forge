@@ -1,4 +1,5 @@
 import tkinter as tk
+import tkinter.font as tkfont
 
 from .theme import COLORS, FONTS, SIZES
 
@@ -91,6 +92,7 @@ class SquareCheckbutton(tk.Frame):
         self.variable = variable
         self.command = command
         self.enabled = True
+        self.minimum_width = fixed_width
         if fixed_width is not None:
             self.configure(width=fixed_width)
             self.pack_propagate(False)
@@ -110,6 +112,7 @@ class SquareCheckbutton(tk.Frame):
             fg=COLORS["text"],
             font=FONTS["body"],
             cursor="hand2",
+            anchor="w",
         )
         self.canvas.pack(side=tk.LEFT, padx=(1, 7))
         self.label.pack(side=tk.LEFT, fill=tk.X, expand=True)
@@ -118,6 +121,7 @@ class SquareCheckbutton(tk.Frame):
         self.bind("<space>", self._toggle, add="+")
         self.bind("<Return>", self._toggle, add="+")
         self.variable.trace_add("write", self._redraw)
+        self._fit_text()
         self._redraw()
 
     def configure(self, cnf=None, **kwargs):
@@ -125,6 +129,7 @@ class SquareCheckbutton(tk.Frame):
         state = kwargs.pop("state", None)
         if text is not None:
             self.label.configure(text=text)
+            self._fit_text()
         if state is not None:
             self.enabled = str(state) != "disabled"
             self.configure_cursor()
@@ -133,6 +138,13 @@ class SquareCheckbutton(tk.Frame):
             super().configure(cnf, **kwargs)
 
     config = configure
+
+    def _fit_text(self):
+        if self.minimum_width is None:
+            return
+        font = tkfont.Font(font=self.label.cget("font"))
+        required = font.measure(self.label.cget("text")) + 38
+        super().configure(width=max(self.minimum_width, required))
 
     def configure_cursor(self):
         cursor = "hand2" if self.enabled else "arrow"
@@ -160,6 +172,4 @@ class SquareCheckbutton(tk.Frame):
             fill = COLORS["accent"] if selected else COLORS["field"]
             label_color = COLORS["text"]
         self.canvas.create_rectangle(2, 2, 18, 18, outline=border, fill=fill, width=1)
-        if selected:
-            self.canvas.create_rectangle(7, 7, 13, 13, outline="", fill=COLORS["white"])
         self.label.configure(fg=label_color)

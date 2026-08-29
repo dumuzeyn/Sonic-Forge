@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+build/
+.sonicforge/
+.env
+*.safetensors
+*.ckpt
+*.gguf
+demo_covers/

@@ -1,9 +1,11 @@
 from tkinter import ttk
 
 
+APP_BACKGROUND = "#F9F9FB"
+
 COLORS = {
-    "bg": "#F5F6F7",
-    "surface": "#FFFFFF",
+    "bg": APP_BACKGROUND,
+    "surface": APP_BACKGROUND,
     "surface_alt": "#F0F1F3",
     "elevated": "#E8EAED",
     "field": "#FBFBFC",
@@ -31,6 +33,9 @@ SIZES = {
     "header_height": 70,
     "tab_height": 42,
     "tooltip_width": 380,
+    "window_width_reserve": 6,
+    "window_height_reserve": 4,
+    "minimum_window_aspect": 4 / 3,
 }
 FONTS = {
     "body": ("Segoe UI", 10),

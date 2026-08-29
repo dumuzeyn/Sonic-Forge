@@ -1,137 +1,163 @@
 # Кузница Звука
 
 <p align="center">
-  <a href="https://github.com/dumuzeyn/Sonic-Forge/blob/main/dist/SonicForge.exe">
-    <img src="https://img.shields.io/badge/Скачать_EXE-Кузница--Звука.exe-24272D?style=for-the-badge" alt="Скачать SonicForge.exe">
+  <a href="https://github.com/dumuzeyn/Sonic-Forge/raw/refs/heads/main/dist/SonicForge.exe">
+    <img src="https://img.shields.io/badge/Скачать-SonicForge.exe-24272D?style=for-the-badge" alt="Скачать SonicForge.exe">
   </a>
 </p>
 
-[English version](#english)
+[English](#sonic-forge)
 
-Кузница Звука — настольная утилита для подготовки музыкальных файлов. Она обрабатывает одну песню или папку, нормализует звук, изменяет метаданные, создаёт обложки и публикует готовый результат только после успешного завершения выбранных этапов.
+Кузница Звука обрабатывает один аудиофайл или папку: анализирует музыку, изменяет звук и метаданные, локально распознаёт текст песни и создаёт обложки. Исходные файлы не изменяются. Готовый результат попадает в выбранную папку только после завершения всех отмеченных этапов.
 
 ## Возможности
 
-- Нормализация громкости через FFmpeg loudnorm, шумоподавление и лимитер.
-- Эквалайзер, частотные срезы, ширина стерео, компрессор и дополнительные звуковые эффекты.
-- Чтение, редактирование, полная перезапись или очистка метаданных в выходной копии.
-- Автоматическое определение жанра и принудительная замена существующего жанра.
-- Генерация обложек в режимах `ocean`, `plasma`, `fusion` и `aurora`.
-- Настраиваемые размер, детализация и Seed; встраивание обложки в MP3.
-- Независимый выбор этапов: звук, метаданные и обложка.
-- Остановка обработки без публикации незавершённых файлов.
-- Русский и английский интерфейс, журнал операций и встроенные FFmpeg/FFprobe.
+- Нормализация громкости, шумоподавление, лимитер, эквалайзер, фильтры, компрессор и эффекты.
+- Просмотр, изменение, полная замена или очистка метаданных.
+- Локальное распознавание текста через `faster-whisper`, определение языка и экспорт TXT/LRC.
+- Независимые этапы **Звук**, **Метаданные**, **Текст** и **Обложка**.
+- Остановка без публикации незавершённых файлов.
+- FFmpeg и FFprobe встроены в EXE.
 
-## Интерфейс
+## Два движка обложек
 
-Источник и папка назначения всегда видны сверху. Остальные настройки разделены на четыре одинаковые вкладки, которые не меняют размер при переключении:
+В приложении доступны два отдельных варианта. Они используют один анализ песни, но создают изображение разными способами.
 
-1. **Источник и результат** — выбор отдельного файла или папки и каталога назначения.
-2. **Метаданные** — основные теги, чтение существующих значений и дополнительные поля.
-3. **Звук** — нормализация, очистка, защита и отдельное окно дополнительных настроек.
-4. **Обложка** — режим, Seed, размер, детализация и параметры встраивания.
-5. **Выполнение** — выбор этапов, запуск, остановка, индикатор и журнал обработки.
+### AI Cover Generation
 
-Флажок **Не менять обложку** отключает связанные параметры, но не скрывает их. При отключённом шумоподавлении поле его силы также становится недоступным.
+Локальный генеративный движок создаёт полноценные художественные сцены: окружение, свет, глубину, центральную метафору и отдельную композицию для каждой песни. Для него используется `stable-diffusion.cpp` и выбранная пользователем совместимая модель `.safetensors`, `.ckpt` или `.gguf`.
 
-## Скачать и запустить
+Для песни создаются четыре художественные концепции. Проверка качества отбрасывает пустые, слишком тёмные, шаблонные и чрезмерно похожие варианты. Текст добавляется только после создания изображения и может быть отключён.
 
-Готовая сборка содержит FFmpeg и FFprobe. Для запуска достаточно одного файла:
+Модель хранится отдельно от EXE:
 
-[Скачать SonicForge.exe](https://github.com/dumuzeyn/Sonic-Forge/blob/main/dist/SonicForge.exe)
-
-```powershell
-.\dist\SonicForge.exe
+```text
+%LOCALAPPDATA%\SonicForge\models\image
 ```
 
-Сборка из исходников:
+После установки модели генерация работает без интернета. Если AI-модель недоступна, выбранный AI-режим может завершить работу через Music2Picture v2 и сообщает об этом в журнале. Это аварийное поведение не объединяет два пользовательских режима: Music2Picture v2 можно выбрать напрямую.
+
+### Music2Picture v2
+
+Встроенный локальный движок не требует отдельной модели. В нём один универсальный параметрический режим без Aurora, Plasma, Ocean и Fusion. Геометрия, композиция, фактура, плотность, палитра, фокус и движение непрерывно вычисляются из `VisualDNA` и `VisualPlan`, поэтому песня не назначается одному из нескольких шаблонов.
+
+## Анализ песни
+
+Общая основа обоих движков:
+
+```text
+Audio
+-> Audio Analysis
+-> VisualDNA
+-> Song Description
+-> Visual Brief + VisualPlan
+-> AI Cover Generation или Music2Picture v2
+```
+
+Анализ учитывает абсолютную громкость и пик без предварительной нормализации, относительную динамику, темп и уверенность, атаки, плотность и регулярность ритма, спектральный центр, спад, контраст, flatness, flux, басовую массу, гармоничность, тональность, лад, смены гармонии и контраст частей песни. Абсолютная громкость, локальная динамика и структура хранятся раздельно.
+
+Звук формирует основную часть `VisualDNA`. Название, метаданные и имеющийся текст песни уточняют смысл, но не заменяют музыкальный характер. Простого правила вида «BPM определяет цвет» нет: палитра одновременно зависит от эмоциональных, тональных, спектральных и структурных признаков.
+
+## Описания для папки
+
+На вкладке **Обложка** можно создать описания для одного файла или сразу для всей папки. Каждая песня получает собственные `song_description` и `visual_brief`. В списке можно открыть результат конкретного трека и перегенерировать только его.
+
+Привязка хранится по нормализованному полному пути, размеру и времени изменения файла, а внутри записи также сохраняется аудио-отпечаток. Неизменённые песни загружаются из кэша:
+
+```text
+%LOCALAPPDATA%\SonicForge\analysis\track_descriptions.json
+```
+
+При указанной папке назначения доступная копия результатов сохраняется в `.sonicforge/track_descriptions.json`. Ошибка одного повреждённого файла записывается отдельно и не останавливает остальные песни.
+
+## Порядок выполнения
+
+Для обложки сначала анализируется исходный звук, затем создаются описание, визуальный план и готовое изображение. Только после этого выполняются выбранные операции со звуком, метаданными и текстом; готовая обложка встраивается в обработанную копию перед публикацией:
+
+```text
+анализ -> VisualDNA -> описание -> визуальный план -> обложка
+-> звук -> метаданные -> текст -> встраивание -> публикация
+```
+
+Имя файла используется как `Title` только при отсутствии тега названия и пустом поле названия в приложении.
+
+## Использование
+
+1. Выберите файл или папку с музыкой и папку назначения.
+2. На вкладке **Обложка** выберите **AI-обложка** или **Music2Picture v2**.
+3. Настройте нужные вкладки.
+4. На вкладке **Выполнение** отметьте этапы и нажмите **Запустить**.
+
+## Командная строка
 
 ```powershell
-pip install numpy pillow psutil pyinstaller
+# Одна песня
+python .\easy_music_process.py --source "C:\Music\song.mp3" --output "C:\Music\Ready"
+
+# Папка с принудительной заменой жанра
+python .\easy_music_process.py --source "C:\Music\Input" --output "C:\Music\Ready" --genre "Rock" --overwrite-genre
+
+# Описания всех песен с постоянным кэшем
+python .\music2picture.py describe --source "C:\Music\Input" --output "C:\Music\Ready"
+
+# Music2Picture v2 без текста на изображении
+python .\music2picture.py covers --source "C:\Music\Input" --output "C:\Music\Covers" --engine music2picture_v2 --text-mode none
+```
+
+## Установка и сборка
+
+Готовая Windows-версия: [скачать SonicForge.exe](https://github.com/dumuzeyn/Sonic-Forge/raw/refs/heads/main/dist/SonicForge.exe).
+
+AI-модель не входит в EXE из-за размера и загружается отдельно из окна управления моделью. Для сборки из исходников:
+
+```powershell
+pip install -r requirements.txt
+pip install pyinstaller
 python -m PyInstaller --noconfirm --clean .\SonicForge.spec
 ```
 
-## Примеры команд
+## Основа проектных решений
 
-Одна песня:
+Архитектура использует собственную компактную реализацию анализа на NumPy/SciPy, но набор признаков и разделение уровней сверялись с первичными источниками:
 
-```powershell
-python .\easy_music_process.py --source "C:\Music\Input\song.mp3" --output "C:\Music\Output" --color-mode plasma
-```
+- [Essentia: spectral, temporal, tonal and rhythm descriptors](https://essentia.upf.edu/documentation.html).
+- [DEAM: continuous valence/arousal annotations for music](https://cvml.unige.ch/databases/DEAM/).
+- [Music-color associations are mediated by emotion, PNAS](https://doi.org/10.1073/pnas.1212562110).
+- [MuLan: joint embedding of music audio and natural language](https://arxiv.org/abs/2208.12415).
+- [CLAP: learning audio concepts from natural-language supervision](https://arxiv.org/abs/2206.04769).
+- [Audio-guided Album Cover Art Generation](https://arxiv.org/abs/2207.07162).
 
-Папка:
+MuLan и CLAP указаны как направление для будущего обучаемого audio-text слоя; их модели не выдаются за уже встроенные в текущий анализатор.
 
-```powershell
-python .\easy_music_process.py --source "C:\Music\Input" --output "C:\Music\Output" --color-mode plasma
-```
-
-Папка с принудительной заменой жанра:
-
-```powershell
-python .\easy_music_process.py --source "C:\Music\Input" --output "C:\Music\Output" --genre "Rock" --overwrite-genre --color-mode plasma
-```
-
-## Иконка
-
-Монограмма `SF` создана в редакторе UZYRO по исходному силуэту. Редактируемый многослойный исходник находится в `assets/SonicForgeIcon.prdx`; PNG и многоразмерный ICO экспортированы из этого проекта. В знаке нет звуковой волны, внешней рамки или скруглённого контейнера.
-
-> **Автор проекта: Зейналов У.Р.о.**
+> Автор проекта: Зейналов У.Р.о.
 
 ---
 
-<h1 id="english">Sonic Forge</h1>
+# Sonic Forge
 
-<p align="center">
-  <a href="https://github.com/dumuzeyn/Sonic-Forge/blob/main/dist/SonicForge.exe">
-    <img src="https://img.shields.io/badge/Download_EXE-Sonic--Forge.exe-24272D?style=for-the-badge" alt="Download SonicForge.exe">
-  </a>
-</p>
+Sonic Forge processes one track or a folder while leaving source files unchanged. Audio, metadata, local lyrics recognition, and cover creation remain independent stages, and completed files are published only after all selected work finishes.
 
-Sonic Forge is a desktop utility for preparing music files. It processes a single song or a folder, normalizes audio, edits metadata, creates cover art, and publishes finished files only after the selected stages complete successfully.
+## Two cover engines
 
-## Features
+**AI Cover Generation** and **Music2Picture v2** are separate user-selectable engines. Both consume the same audio-first pipeline:
 
-- FFmpeg loudnorm normalization, denoise, and limiter.
-- Equalizer, frequency cutoffs, stereo width, compressor, and additional effects.
-- Read, edit, fully replace, or clear metadata in the output copy.
-- Automatic genre estimation and forced replacement of existing genres.
-- Cover generation in `ocean`, `plasma`, `fusion`, and `aurora` modes.
-- Configurable size, detail, Seed, and MP3 cover embedding.
-- Independent audio, metadata, and cover processing stages.
-- Safe cancellation without publishing incomplete files.
-- Russian and English UI, an integrated processing log, and bundled FFmpeg/FFprobe.
-
-## Interface
-
-Source and destination remain visible at the top. Metadata, audio, cover art, and processing are separated into four equal tabs whose size does not change when selected. Additional audio and metadata fields open in compact dialogs.
-
-**Do not change cover** disables related controls without hiding them. Disabling denoise also disables its strength field.
-
-## Download And Launch
-
-[Download SonicForge.exe](https://github.com/dumuzeyn/Sonic-Forge/blob/main/dist/SonicForge.exe)
-
-```powershell
-.\dist\SonicForge.exe
+```text
+Audio -> Audio Analysis -> VisualDNA -> Song Description
+-> Visual Brief + VisualPlan -> selected cover engine
 ```
 
-Build from source:
+AI Cover Generation uses a local `stable-diffusion.cpp` model to create cinematic, surreal, or editorial scenes and then applies quality control and optional typography. Music2Picture v2 is a built-in procedural renderer with one adaptive parametric system. It has no Aurora, Plasma, Ocean, or Fusion user modes.
 
-```powershell
-pip install numpy pillow psutil pyinstaller
-python -m PyInstaller --noconfirm --clean .\SonicForge.spec
-```
+The analysis keeps absolute loudness, local dynamics, global structure, rhythm, timbre, harmony, key, section contrast, and spectral change as distinct evidence. Audio dominates VisualDNA; metadata and existing lyrics provide bounded semantic guidance.
 
-## Command Examples
+## Batch descriptions
 
-```powershell
-python .\easy_music_process.py --source "C:\Music\Input\song.mp3" --output "C:\Music\Output" --color-mode plasma
-python .\easy_music_process.py --source "C:\Music\Input" --output "C:\Music\Output" --color-mode plasma
-python .\easy_music_process.py --source "C:\Music\Input" --output "C:\Music\Output" --genre "Rock" --overwrite-genre --color-mode plasma
-```
+Selecting a folder can generate a separate `song_description` and `visual_brief` for every supported audio file. Results are attached to each track by canonical path, size, modification time, and an audio fingerprint. Unchanged tracks are restored from `%LOCALAPPDATA%\SonicForge\analysis\track_descriptions.json`. One damaged file does not stop the batch, and the selected track can be regenerated independently.
 
-## Icon
+## Download
 
-The `SF` monogram was traced from the supplied silhouette in UZYRO. Its editable layered source is `assets/SonicForgeIcon.prdx`; the PNG and multi-size ICO are exported from that project. The mark has no waveform, outer border, or rounded container.
+[Download SonicForge.exe](https://github.com/dumuzeyn/Sonic-Forge/raw/refs/heads/main/dist/SonicForge.exe)
 
-> **Project author: Zeynalov U.R.o.**
+FFmpeg and FFprobe are bundled. The multi-gigabyte image model remains a separate optional download managed inside the application.
+
+> Project author: Zeynalov U.R.o.

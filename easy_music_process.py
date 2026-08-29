@@ -17,7 +17,6 @@ RUN_FROM_CODE = False
 CODE_SOURCE = r"C:\Path\To\MusicFolder"
 CODE_OUTPUT = r"C:\Path\To\ProcessedMusic"
 CODE_GENRE = None
-CODE_COLOR_MODE = "plasma"
 CODE_INTEGRATED_LUFS = -14.0
 CODE_TRUE_PEAK = -1.5
 CODE_LRA = 11.0
@@ -47,9 +46,15 @@ CODE_OVERWRITE_ALL_METADATA = False
 CODE_EXTRA_METADATA = {}
 CODE_COVER_SEED = None
 CODE_COVER_SIZE = 1000
-CODE_CENTER_TITLE = True
+CODE_COVER_DETAIL = "balanced"
+CODE_COVER_TEXT_MODE = "title_artist"
+CODE_COVER_MOOD = "auto"
+CODE_COVER_ENGINE = "ai"
 CODE_EMBED_COVER = True
 CODE_CHANGE_COVER = True
+CODE_LYRICS_FORMAT = "txt"
+CODE_LYRICS_LANGUAGE = "auto"
+CODE_OVERWRITE_LYRICS = False
 
 
 def load_python_file(name, filename):
@@ -118,7 +123,6 @@ def process_music(
     source,
     output,
     genre=None,
-    color_mode="plasma",
     integrated_lufs=-14.0,
     true_peak=-1.5,
     lra=11.0,
@@ -148,13 +152,21 @@ def process_music(
     extra_metadata=None,
     cover_seed=None,
     cover_size=1000,
-    cover_patterns=2,
-    center_title=True,
+    cover_detail="balanced",
+    cover_text_mode="title_artist",
+    cover_mood="auto",
     embed_cover=True,
     change_cover=True,
     process_steps=None,
     metadata_mode="update",
     title=None,
+    cover_lyrics_text="",
+    lyrics_format="txt",
+    lyrics_language="auto",
+    overwrite_lyrics=False,
+    lyrics_service=None,
+    cover_provider=None,
+    cover_engine="ai",
     cancel_event=None,
 ):
     source_path = Path(source).expanduser()
@@ -162,15 +174,50 @@ def process_music(
     output_parent = output_path.resolve().parent
     output_parent.mkdir(parents=True, exist_ok=True)
 
-    steps = set(process_steps or {"audio", "metadata", "cover"})
-    allowed_steps = {"audio", "metadata", "cover"}
+    steps = set(process_steps or {"audio", "metadata", "lyrics", "cover"})
+    allowed_steps = {"audio", "metadata", "lyrics", "cover"}
     if not steps or not steps.issubset(allowed_steps):
-        raise ValueError("process_steps must contain audio, metadata, and/or cover")
+        raise ValueError("process_steps must contain audio, metadata, lyrics, and/or cover")
 
     check_cancelled(cancel_event)
+    lyrics_lookup = {}
+    if "cover" in steps:
+        from lyrics_engine import LyricsService
+
+        service = LyricsService(metadata_reader=music_metadata.read_all_metadata)
+        source_base = source_path.parent if source_path.is_file() else source_path
+        for original_audio in music_metadata.audio_files(source_path):
+            existing = service.load_existing(original_audio)
+            if existing and existing.text.strip():
+                relative_key = str(original_audio.relative_to(source_base).with_suffix("")).replace("\\", "/")
+                lyrics_lookup[relative_key] = existing.text
+        if cover_lyrics_text and source_path.is_file():
+            lyrics_lookup[source_path.stem] = cover_lyrics_text.strip()
+
     with tempfile.TemporaryDirectory(prefix="musicpolisher_", dir=output_parent) as temp_dir:
         staging_path = Path(temp_dir) / "processed"
+        generated_covers_path = Path(temp_dir) / "generated_covers"
         covers_path = staging_path / "covers"
+
+        check_cancelled(cancel_event)
+        if "cover" in steps and change_cover:
+            print("\nAnalyse each source song and create its cover")
+            music2picture.require_ffmpeg()
+            music2picture.make_covers(
+                source_path,
+                generated_covers_path,
+                size=cover_size,
+                embed=False,
+                seed=cover_seed,
+                lyrics_text=cover_lyrics_text,
+                lyrics_lookup=lyrics_lookup,
+                detail=cover_detail,
+                text_mode=cover_text_mode,
+                mood_override=cover_mood,
+                engine=cover_engine,
+                provider=cover_provider,
+                cancel_event=cancel_event,
+            )
 
         check_cancelled(cancel_event)
         if "audio" in steps:
@@ -236,18 +283,30 @@ def process_music(
             )
 
         check_cancelled(cancel_event)
-        if "cover" in steps and change_cover:
-            print("\nCreate and embed covers")
-            music2picture.require_ffmpeg()
-            music2picture.make_covers(
+        if "lyrics" in steps:
+            print("\nRecognize lyrics for each song")
+            from lyrics_engine import recognize_batch
+
+            lyrics_lookup = recognize_batch(
+                source_path,
                 staging_path,
+                output=output_path,
+                service=lyrics_service,
+                export_format=lyrics_format,
+                overwrite=overwrite_lyrics,
+                language=lyrics_language,
+                cancel_event=cancel_event,
+            )
+
+        check_cancelled(cancel_event)
+        if "cover" in steps and change_cover:
+            print("\nAttach the completed covers to processed files")
+            music2picture.apply_generated_covers(
+                staging_path,
+                generated_covers_path,
                 covers_path,
                 size=cover_size,
-                patterns=cover_patterns,
-                center_title=center_title,
                 embed=embed_cover,
-                color_mode=color_mode,
-                seed=cover_seed,
                 cancel_event=cancel_event,
             )
         elif "cover" in steps:
@@ -277,7 +336,6 @@ def main():
     parser.add_argument("--date", help="Set date/year metadata.")
     parser.add_argument("--track", help="Set track metadata.")
     parser.add_argument("--comment", help="Set comment metadata.")
-    parser.add_argument("--color-mode", choices=sorted(music2picture.COLOR_MODES), default="plasma", help="Cover color mode.")
     parser.add_argument("--integrated-lufs", type=float, default=-14.0, help="Target integrated loudness.")
     parser.add_argument("--true-peak", type=float, default=-1.5, help="Target true peak.")
     parser.add_argument("--lra", type=float, default=11.0, help="Target loudness range.")
@@ -308,14 +366,18 @@ def main():
     parser.add_argument("--overwrite-all-metadata", action="store_true", help="Clear existing metadata before writing selected fields.")
     parser.add_argument("--cover-seed", type=int, help="Use an integer for repeatable generated covers.")
     parser.add_argument("--cover-size", type=int, default=1000, help="Generated cover size in pixels.")
-    parser.add_argument("--cover-patterns", type=int, choices=(1, 2), default=2, help="Cover detail level.")
-    parser.add_argument("--center-title", dest="center_title", action="store_true", default=True, help="Draw title in the center of the cover. Enabled by default.")
-    parser.add_argument("--no-center-title", dest="center_title", action="store_false", help="Do not draw title in the center.")
+    parser.add_argument("--cover-detail", choices=("simple", "balanced", "rich"), default="balanced")
+    parser.add_argument("--cover-text", choices=("title_artist", "title", "none"), default="title_artist")
+    parser.add_argument("--cover-mood", choices=("auto", "calm", "melancholic", "energetic", "intense", "romantic"), default="auto")
+    parser.add_argument("--cover-engine", choices=("ai", "music2picture_v2"), default="ai")
     parser.add_argument("--embed-cover", dest="embed_cover", action="store_true", default=True, help="Embed generated cover into MP3. Enabled by default.")
     parser.add_argument("--no-embed-cover", dest="embed_cover", action="store_false", help="Do not embed generated cover.")
     parser.add_argument("--change-cover", dest="change_cover", action="store_true", default=True, help="Generate and embed a new cover. Enabled by default.")
     parser.add_argument("--no-change-cover", dest="change_cover", action="store_false", help="Do not generate or embed a new cover.")
-    parser.add_argument("--steps", choices=["all", "audio", "metadata", "cover"], default="all", help="Choose one processing stage or run all stages.")
+    parser.add_argument("--lyrics-format", choices=("txt", "lrc"), default="txt")
+    parser.add_argument("--lyrics-language", default="auto", help="Automatic detection or an ISO language code such as ru/en.")
+    parser.add_argument("--overwrite-lyrics", action="store_true")
+    parser.add_argument("--steps", choices=["all", "audio", "metadata", "lyrics", "cover"], default="all", help="Choose one processing stage or run all stages.")
     parser.add_argument("--metadata-mode", choices=["update", "replace", "clear"], default="update", help="Preserve, replace, or clear metadata.")
     args = parser.parse_args()
 
@@ -329,7 +391,6 @@ def main():
         output,
         genre=genre,
         title=args.title,
-        color_mode=args.color_mode,
         integrated_lufs=args.integrated_lufs,
         true_peak=args.true_peak,
         lra=args.lra,
@@ -367,12 +428,17 @@ def main():
         },
         cover_seed=args.cover_seed,
         cover_size=args.cover_size,
-        cover_patterns=args.cover_patterns,
-        center_title=args.center_title,
+        cover_detail=args.cover_detail,
+        cover_text_mode=args.cover_text,
+        cover_mood=args.cover_mood,
+        cover_engine=args.cover_engine,
         embed_cover=args.embed_cover,
         change_cover=args.change_cover,
         process_steps=None if args.steps == "all" else {args.steps},
         metadata_mode=args.metadata_mode,
+        lyrics_format=args.lyrics_format,
+        lyrics_language=args.lyrics_language,
+        overwrite_lyrics=args.overwrite_lyrics,
     )
 
 
@@ -381,7 +447,6 @@ def run_from_code_settings():
         CODE_SOURCE,
         CODE_OUTPUT,
         genre=CODE_GENRE,
-        color_mode=CODE_COLOR_MODE,
         integrated_lufs=CODE_INTEGRATED_LUFS,
         true_peak=CODE_TRUE_PEAK,
         lra=CODE_LRA,
@@ -411,9 +476,14 @@ def run_from_code_settings():
         extra_metadata=CODE_EXTRA_METADATA,
         cover_seed=CODE_COVER_SEED,
         cover_size=CODE_COVER_SIZE,
-        center_title=CODE_CENTER_TITLE,
+        cover_detail=CODE_COVER_DETAIL,
+        cover_text_mode=CODE_COVER_TEXT_MODE,
+        cover_mood=CODE_COVER_MOOD,
         embed_cover=CODE_EMBED_COVER,
         change_cover=CODE_CHANGE_COVER,
+        lyrics_format=CODE_LYRICS_FORMAT,
+        lyrics_language=CODE_LYRICS_LANGUAGE,
+        overwrite_lyrics=CODE_OVERWRITE_LYRICS,
     )
 
 
