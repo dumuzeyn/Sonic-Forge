@@ -10,7 +10,7 @@ ct2_binaries = collect_dynamic_libs('ctranslate2')
 a = Analysis(
     ['music_polisher_gui.py'],
     pathex=[],
-    binaries=[('C:\\ffmpeg\\bin\\ffmpeg.exe', 'ffmpeg'), ('C:\\ffmpeg\\bin\\ffprobe.exe', 'ffmpeg')] + ct2_binaries,
+    binaries=[('C:\\ffmpeg\\bin\\ffmpeg.exe', 'ffmpeg')] + ct2_binaries,
     datas=[
         ('Normalize-Music.py', '.'),
         ('assets\\sonic_forge_mark.ico', 'assets'),
@@ -49,11 +49,23 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
+splash = Splash(
+    'assets\\sonic_forge_mark.png',
+    binaries=a.binaries,
+    datas=a.datas,
+    text_pos=None,
+    max_img_size=(280, 280),
+    minify_script=True,
+    always_on_top=True,
+)
+
 exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
     a.datas,
+    splash,
+    splash.binaries,
     [],
     name='SonicForge',
     debug=False,

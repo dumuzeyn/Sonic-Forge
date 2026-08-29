@@ -2,10 +2,12 @@ import tempfile
 import unittest
 import wave
 import json
+import subprocess
 from pathlib import Path
 from unittest import mock
 
-from easy_music_process import process_music
+import music_metadata
+from easy_music_process import normalize_music_file, process_music
 from lyrics_engine import LyricsResult, LyricsService, TranscriptSegment
 from lyrics_engine.providers import MockLyricsProvider
 from cover_engine import MockImageProvider
@@ -16,6 +18,22 @@ class FailingLyricsProvider:
         raise RuntimeError("forced lyrics failure")
 
 class ProcessingPipelineTests(unittest.TestCase):
+    def test_metadata_and_duration_do_not_need_ffprobe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "tags.mp3"
+            subprocess.run(
+                [
+                    "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                    "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+                    "-metadata", "title=Проверка", "-metadata", "genre=Pop", str(path),
+                ],
+                check=True,
+            )
+            tags = music_metadata.read_all_metadata(path)
+            self.assertEqual(tags["title"], "Проверка")
+            self.assertEqual(tags["genre"], "Pop")
+            self.assertAlmostEqual(normalize_music_file.probe_duration(path), 1.0, delta=0.1)
+
     def test_cover_analysis_and_generation_happen_before_remaining_outputs(self):
         events = []
         with tempfile.TemporaryDirectory() as directory:

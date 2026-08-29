@@ -22,8 +22,8 @@ COVER_ENGINES = (ENGINE_AI, ENGINE_MUSIC2PICTURE_V2)
 
 
 def require_ffmpeg():
-    if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
-        raise RuntimeError("FFmpeg and FFprobe are required")
+    if not shutil.which("ffmpeg"):
+        raise RuntimeError("FFmpeg is required")
 
 
 def clean_stem(path):

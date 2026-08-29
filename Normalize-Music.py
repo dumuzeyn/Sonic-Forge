@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from mutagen import File as MutagenFile
+
 
 AUDIO_EXTENSIONS = {".mp3", ".flac", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".wma"}
 SUBPROCESS_STARTUP_KWARGS = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
@@ -96,27 +98,10 @@ def output_path_for(source_root, output_root, audio_path):
 
 
 def probe_duration(audio_path):
-    result = subprocess.run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(audio_path),
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        **SUBPROCESS_STARTUP_KWARGS,
-    )
     try:
-        return max(0.0, float(result.stdout.strip()))
-    except ValueError:
+        audio = MutagenFile(audio_path)
+        return max(0.0, float(audio.info.length)) if audio is not None else 0.0
+    except (AttributeError, OSError, TypeError, ValueError):
         return 0.0
 
 

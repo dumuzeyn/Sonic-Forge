@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from mutagen import File as MutagenFile
 
 
 AUDIO_EXTENSIONS = {".mp3", ".flac", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".wma"}
@@ -57,8 +58,6 @@ GENRE_KEYWORDS = {
 def require_ffmpeg():
     if not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg was not found in PATH.")
-    if not shutil.which("ffprobe"):
-        raise RuntimeError("ffprobe was not found in PATH.")
 
 
 def run(command):
@@ -279,62 +278,59 @@ def estimate_genre(audio_path, allowed_genres):
 
 
 def read_existing_genre(audio_path):
-    command = [
-        "ffprobe",
-        "-v",
-        "error",
-        "-show_entries",
-        "format_tags=genre",
-        "-of",
-        "default=noprint_wrappers=1:nokey=1",
-        str(audio_path),
-    ]
-    result = subprocess.run(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        **SUBPROCESS_STARTUP_KWARGS,
-    )
-    if result.returncode != 0:
-        return ""
-    for line in result.stdout.splitlines():
-        value = line.strip()
-        if value:
-            return value
-    return ""
+    return read_all_metadata(audio_path).get("genre", "")
 
 
 def read_all_metadata(audio_path):
-    command = [
-        "ffprobe",
-        "-v",
-        "error",
-        "-show_entries",
-        "format_tags",
-        "-of",
-        "json",
-        str(audio_path),
-    ]
-    result = subprocess.run(
-        command,
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        **SUBPROCESS_STARTUP_KWARGS,
-    )
-    data = json.loads(result.stdout or "{}")
-    tags = data.get("format", {}).get("tags", {})
-    return {
-        str(key).strip().lower(): str(value).strip()
-        for key, value in tags.items()
-        if str(key).strip()
+    audio = MutagenFile(audio_path, easy=True)
+    if audio is None or audio.tags is None:
+        return {}
+    tags = {}
+    for key, values in audio.tags.items():
+        if isinstance(values, (list, tuple)):
+            value = "; ".join(str(item).strip() for item in values if str(item).strip())
+        else:
+            value = str(values).strip()
+        if value:
+            tags[str(key).strip().lower()] = value
+    aliases = {
+        "albumartist": "album_artist",
+        "tracknumber": "track",
+        "discnumber": "disc",
+        "organization": "publisher",
     }
+    for source, target in aliases.items():
+        if source in tags:
+            tags.setdefault(target, tags[source])
+    _add_extended_metadata(audio_path, tags)
+    return tags
+
+
+def _add_extended_metadata(audio_path, tags):
+    raw = MutagenFile(audio_path, easy=False)
+    raw_tags = getattr(raw, "tags", None)
+    if raw_tags is None:
+        return
+    key_map = {
+        "COMM": "comment",
+        "TCOP": "copyright",
+        "TPUB": "publisher",
+        "USLT": "lyrics",
+        "©cmt": "comment",
+        "cprt": "copyright",
+        "©lyr": "lyrics",
+    }
+    for key, value in raw_tags.items():
+        normalized = str(key).split(":", 1)[0]
+        target = key_map.get(normalized)
+        if not target or target in tags:
+            continue
+        text = getattr(value, "text", value)
+        if isinstance(text, (list, tuple)):
+            text = "\n".join(str(item).strip() for item in text if str(item).strip())
+        text = str(text).strip()
+        if text:
+            tags[target] = text
 
 
 def normalized_extra_metadata(extra_metadata=None):

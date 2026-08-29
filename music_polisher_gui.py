@@ -220,6 +220,12 @@ class SonicForgeApp(tk.Tk):
             startup_width,
             startup_height,
         )
+        try:
+            import pyi_splash
+
+            pyi_splash.close()
+        except ImportError:
+            pass
 
     def _configure_fonts(self):
         for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont"):
