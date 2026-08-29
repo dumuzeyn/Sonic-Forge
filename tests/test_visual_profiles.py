@@ -131,6 +131,21 @@ class VisualProfileTests(unittest.TestCase):
             self.assertIn("typography", data)
             self.assertFalse(artwork.fallback)
 
+    def test_direct_cover_generates_one_candidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cover.png"
+            composer = CoverComposer(provider=MockImageProvider())
+            composer.create(
+                SongContext(title="Один готовый вариант", artist="Автор"),
+                path,
+                size=192,
+                seed=4,
+                candidate_limit=1,
+            )
+            profile_path = path.parent / ".sonicforge" / "cover.profile.json"
+            data = json.loads(profile_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(data["candidates"]), 1)
+
     def test_mixed_language_title_stays_inside_safe_area(self):
         engine = TypographyEngine()
         image = Image.new("RGB", (512, 512), "#d8dee8")

@@ -85,11 +85,19 @@ class CoverProviderTests(unittest.TestCase):
             runtime = manager.runtime_dir / "sd-cli.exe"
             runtime.parent.mkdir(parents=True)
             runtime.touch()
-            with mock.patch.object(manager, "semantic_model_path", return_value=root / "semantic.safetensors"):
-                status = manager.status()
+            status = manager.status()
             self.assertTrue(status.ready)
             self.assertEqual(status.model_path, model.resolve())
             self.assertNotEqual(status.model_path.parent, manager.root)
+
+    def test_executable_does_not_bundle_clip_or_torch(self):
+        root = Path(__file__).resolve().parents[1]
+        requirements = (root / "requirements.txt").read_text(encoding="utf-8").lower()
+        specification = (root / "SonicForge.spec").read_text(encoding="utf-8").lower()
+        self.assertNotIn("open_clip_torch", requirements)
+        self.assertNotIn("collect_dynamic_libs('torch')", specification)
+        self.assertIn("'open_clip'", specification)
+        self.assertIn("'torch'", specification)
 
     def test_memory_error_retries_in_economy_mode(self):
         backend = StableDiffusionCppBackend()

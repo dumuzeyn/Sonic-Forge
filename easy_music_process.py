@@ -201,7 +201,7 @@ def process_music(
 
         check_cancelled(cancel_event)
         if "cover" in steps and change_cover:
-            print("\nAnalyse each source song and create its cover")
+            print("\nСоздание обложек для выбранных песен")
             music2picture.require_ffmpeg()
             music2picture.make_covers(
                 source_path,
@@ -221,7 +221,7 @@ def process_music(
 
         check_cancelled(cancel_event)
         if "audio" in steps:
-            print("\nNormalize, gently denoise, and safely boost audio")
+            print("\nОбработка звука")
             normalize_music_file.normalize_music(
                 source_path,
                 staging_path,
@@ -252,7 +252,7 @@ def process_music(
                 cancel_event=cancel_event,
             )
         else:
-            print("\nCopy source audio to the protected working area")
+            print("\nПодготовка рабочей копии аудио")
             stage_source_files(
                 source_path,
                 staging_path,
@@ -261,14 +261,14 @@ def process_music(
 
         check_cancelled(cancel_event)
         if "metadata" in steps and metadata_mode == "clear":
-            print("\nClear all metadata")
+            print("\nОчистка метаданных")
             music_metadata.require_ffmpeg()
             music_metadata.clear_music_metadata(
                 staging_path,
                 cancel_event=cancel_event,
             )
         elif "metadata" in steps:
-            print("\nWrite selected metadata")
+            print("\nЗапись выбранных метаданных")
             music_metadata.require_ffmpeg()
             music_metadata.update_music_metadata(
                 staging_path,
@@ -284,7 +284,7 @@ def process_music(
 
         check_cancelled(cancel_event)
         if "lyrics" in steps:
-            print("\nRecognize lyrics for each song")
+            print("\nРаспознавание текста песен")
             from lyrics_engine import recognize_batch
 
             lyrics_lookup = recognize_batch(
@@ -300,7 +300,7 @@ def process_music(
 
         check_cancelled(cancel_event)
         if "cover" in steps and change_cover:
-            print("\nAttach the completed covers to processed files")
+            print("\nДобавление обложек в готовые файлы")
             music2picture.apply_generated_covers(
                 staging_path,
                 generated_covers_path,
@@ -310,15 +310,15 @@ def process_music(
                 cancel_event=cancel_event,
             )
         elif "cover" in steps:
-            print("\nSkip cover changes")
+            print("\nОбложки оставлены без изменений")
 
         check_cancelled(cancel_event)
-        print("\nPublish processed files to output folder")
+        print("\nСохранение готовых файлов")
         publish_processed_tree(staging_path, output_path)
 
-    print(f"\nDone. Songs are saved in: {output_path.resolve()}")
+    print(f"\nГотово. Песни сохранены: {output_path.resolve()}")
     if "cover" in steps and change_cover:
-        print(f"Covers are saved in: {(output_path / 'covers').resolve()}")
+        print(f"Обложки сохранены: {(output_path / 'covers').resolve()}")
 
 
 def main():

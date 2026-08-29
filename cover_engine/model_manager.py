@@ -51,15 +51,13 @@ class ImageModelManager:
         model_path = self.model_path()
         runtime_path = self.runtime_path()
         semantic_path = self.semantic_model_path()
-        if model_path and runtime_path and semantic_path:
+        if model_path and runtime_path:
             return ModelStatus(True, model_path, runtime_path, semantic_path, f"{model_path.name} готова")
         missing = []
         if not model_path:
             missing.append("AI-модель")
         if not runtime_path:
             missing.append("локальный движок")
-        if not semantic_path:
-            missing.append("семантическая проверка")
         return ModelStatus(False, model_path, runtime_path, semantic_path, "Не установлено: " + ", ".join(missing))
 
     def model_path(self):
@@ -124,7 +122,6 @@ class ImageModelManager:
                 cancel_event,
             )
         self._verify_recommended()
-        self._ensure_semantic_model(progress, cancel_event)
         self.use_recommended()
         return self.status()
 
@@ -132,19 +129,7 @@ class ImageModelManager:
         self.root.mkdir(parents=True, exist_ok=True)
         if not self.runtime_path():
             self._download_runtime(progress, cancel_event)
-        self._ensure_semantic_model(progress, cancel_event)
         return self.status()
-
-    def _ensure_semantic_model(self, progress, cancel_event):
-        if not self.semantic_model_path():
-            self.semantic_path.unlink(missing_ok=True)
-            self._download(SEMANTIC_MODEL_URL, self.semantic_path, "semantic", progress, cancel_event)
-        self._verify_file(
-            self.semantic_path,
-            SEMANTIC_MODEL_SIZE,
-            SEMANTIC_MODEL_SHA256,
-            "семантической модели",
-        )
 
     def _download_runtime(self, progress, cancel_event):
         request = urllib.request.Request(

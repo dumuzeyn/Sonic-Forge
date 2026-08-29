@@ -49,6 +49,7 @@ def make_cover(
     composer=None,
     cancel_event=None,
     regenerate_description=False,
+    candidate_limit=None,
     **_compatibility,
 ):
     """Analyze one track, persist its text artifacts, then render with one engine."""
@@ -68,20 +69,19 @@ def make_cover(
     )
     variation = int(seed or 0)
     stages = {
-        "loading_audio": "Загрузка звука",
-        "analysing_rhythm": "Анализ ритма",
-        "analysing_timbre": "Анализ тембра",
-        "analysing_harmony": "Анализ гармонии",
-        "analysing_structure": "Анализ структуры песни",
-        "building_visual_dna": "Создание VisualDNA",
-        "creating_song_description": "Создание описания песни",
-        "creating_visual_plan": "Создание визуального плана",
-        "creating_visual_brief": "Подготовка задания для генератора",
+        "loading_audio": "Чтение аудио...",
+        "analysing_rhythm": "Анализ характера песни...",
+        "building_visual_dna": "Подбор образа и композиции...",
+        "creating_visual_brief": "Подготовка изображения...",
     }
+    emitted_stages = set()
 
     def progress(stage):
         check_cancelled(cancel_event)
-        print(stages.get(stage, stage))
+        message = stages.get(stage)
+        if message and message not in emitted_stages:
+            emitted_stages.add(message)
+            print(message)
 
     bundle = DEFAULT_PIPELINE.analyse(
         path,
@@ -93,7 +93,6 @@ def make_cover(
         force=regenerate_description,
     )
     DescriptionStore().put(path, bundle)
-    print(f"Описание песни: {bundle.song_description}")
     check_cancelled(cancel_event)
 
     title = tags.get("title") or clean_stem(path)
@@ -161,6 +160,7 @@ def make_cover(
             audio_path=path,
             cancel_event=cancel_event,
             analysis_bundle=bundle,
+            candidate_limit=candidate_limit,
         )
     finally:
         if owns_provider and provider is not None:

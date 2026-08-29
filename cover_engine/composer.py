@@ -7,7 +7,6 @@ from .concepts import CoverConceptBuilder
 from .diversity import DiversityController
 from .profiles import VisualProfileBuilder
 from .providers import AutoImageProvider, CoverRequest
-from .semantic_quality import SemanticQualityEvaluator
 from .typography import TypographyEngine
 
 
@@ -19,8 +18,6 @@ class CoverComposer:
         self.typography = typography or TypographyEngine()
         self.diversity = diversity or DiversityController()
         self.semantic = semantic
-        if self.semantic is None and getattr(self.provider, "name", "") != "mock":
-            self.semantic = SemanticQualityEvaluator()
 
     def create(
         self,
@@ -33,33 +30,21 @@ class CoverComposer:
         audio_path=None,
         cancel_event=None,
         analysis_bundle=None,
+        candidate_limit=None,
     ):
         profile = self.profile_builder.build(song, seed=seed)
         concepts = self.concept_builder.build_candidates(song, profile, seed=seed, detail=detail, count=4)
         ranked = self.diversity.rank(concepts)
-        self._log_profile(profile)
-        if profile.song_description:
-            print(f"Описание песни: {profile.song_description}")
-        if profile.visual_brief:
-            print("Визуальный план создан на основе анализа звука.")
-        print("Создано 4 разных художественных концепции:")
-        for concept in concepts:
-            score, generic = self.diversity.concept_score(concept)
-            suffix = f"; ограничение: {', '.join(generic)}" if generic else ""
-            print(
-                f"  {concept.concept_id}: {concept.candidate_type}; "
-                f"сцена={concept.scene}; символ={concept.main_symbol}; "
-                f"палитра={concept.palette_name}; композиция={concept.composition}; "
-                f"оценка концепции={score:.1f}{suffix}"
-            )
-
         generation_pool = ranked[:3] if detail == "simple" else ranked
+        if candidate_limit is not None:
+            generation_pool = generation_pool[:max(1, int(candidate_limit))]
+        print(f"Подготовлено вариантов: {len(generation_pool)}")
         results = self._generate_candidates(
             generation_pool, profile, size, seed, detail, audio_path, cancel_event, analysis_bundle,
         )
         local_results = [item for item in results if not item[1].fallback]
         accepted = [item for item in local_results if item[2].accepted]
-        if local_results and not accepted:
+        if local_results and not accepted and candidate_limit is None:
             print("Все первые варианты отклонены контролем качества. Создаются новые трактовки...")
             recovery = self.concept_builder.build_candidates(
                 song, profile, seed=seed, detail=detail, count=4, offset=1,
@@ -76,6 +61,8 @@ class CoverComposer:
         fallback_results = [item for item in results if item[1].fallback]
         if accepted:
             concept, artwork, assessment = max(accepted, key=lambda item: item[2].score)
+        elif local_results:
+            concept, artwork, assessment = max(local_results, key=lambda item: item[2].score)
         elif fallback_results:
             concept, artwork, assessment = max(fallback_results, key=lambda item: item[2].score)
         else:
@@ -87,11 +74,7 @@ class CoverComposer:
             print(f"Fallback used: {artwork.provider}; reason: {artwork.note}")
         else:
             print(f"Local AI used: {artwork.provider}")
-        print(
-            f"Выбран вариант {concept.concept_id}: {concept.main_symbol}; "
-            f"палитра={concept.palette_name}; композиция={concept.composition}; "
-            f"оценка={assessment.score:.1f}"
-        )
+        print(f"Выбран лучший вариант: {concept.concept_id}")
 
         image = self.typography.compose(
             artwork.image,
@@ -105,11 +88,7 @@ class CoverComposer:
         _check_cancelled(cancel_event)
         typography_layout = getattr(self.typography, "last_layout", {})
         if text_mode != "none":
-            print(
-                "Текст размещён: "
-                f"{typography_layout.get('placement', concept.text_position)}; "
-                f"стиль={typography_layout.get('style', concept.typography_style)}"
-            )
+            print("Название и исполнитель добавлены на обложку")
         self._validate(image, size)
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)

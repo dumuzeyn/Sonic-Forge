@@ -426,6 +426,8 @@ class SonicForgeView(ttk.Frame):
                 bg=COLORS["field"],
                 fg=COLORS["secondary"],
                 anchor="center",
+                justify=tk.CENTER,
+                wraplength=190,
                 font=FONTS["small"],
             ),
             "cover_preview_empty",

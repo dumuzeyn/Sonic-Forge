@@ -2,7 +2,6 @@ from .composer import CoverComposer
 from .concepts import CoverConcept, CoverConceptBuilder
 from .diversity import ArtworkAssessment, DiversityController
 from .profiles import SongContext, VisualProfile, VisualProfileBuilder
-from .semantic_quality import SemanticQualityEvaluator
 from .model_manager import ImageModelManager
 from .providers import (
     AutoImageProvider,
@@ -27,7 +26,6 @@ __all__ = [
     "Music2PictureProvider",
     "OpenAIImageProvider",
     "SongContext",
-    "SemanticQualityEvaluator",
     "VisualProfile",
     "VisualProfileBuilder",
 ]
