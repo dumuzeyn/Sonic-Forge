@@ -8,6 +8,11 @@ FONT_CANDIDATES = (
     "C:/Windows/Fonts/arialbd.ttf",
     "C:/Windows/Fonts/dejavusans-bold.ttf",
 )
+ARTISTIC_FONT_CANDIDATES = (
+    "C:/Windows/Fonts/segoeuib.ttf",
+    "C:/Windows/Fonts/arialbd.ttf",
+    "C:/Windows/Fonts/ariblk.ttf",
+)
 
 PLACEMENTS = ("top", "bottom", "left", "right", "center")
 STYLE_SCALE = {
@@ -36,20 +41,30 @@ class TypographyEngine:
         max_height = int(size * (.52 if style == "artistic title" else (.21 if style == "editorial title" else .18)))
         base_scale = STYLE_SCALE.get(style, .088)
         display_title = self._display_title(title.strip(), style, language)
-        font, lines = self._fit(display_title, max_width, max_height, size, base_scale)
+        font_candidates = ARTISTIC_FONT_CANDIDATES if style == "artistic title" else FONT_CANDIDATES
+        font, lines = self._fit(
+            display_title, max_width, max_height, size, base_scale, font_candidates=font_candidates
+        )
         draw_probe = ImageDraw.Draw(Image.new("L", (4, 4)))
         line_gap = max(4, int(font.size * .11))
         boxes = [draw_probe.textbbox((0, 0), line, font=font, stroke_width=1) for line in lines]
         title_height = sum(box[3] - box[1] for box in boxes) + line_gap * max(0, len(lines) - 1)
         artist_text = artist.strip().upper() if show_artist and artist.strip() else ""
         artist_font = self._fit_single_line(
-            artist_text, max_width, max(12, int(font.size * .29)), max(10, int(size * .018))
+            artist_text,
+            max_width,
+            max(12, int(font.size * .29)),
+            max(10, int(size * .018)),
+            font_candidates=font_candidates,
         )
         artist_height = int(artist_font.size * 1.55) if artist_text else 0
         block_height = title_height + artist_height
         x, y, anchor = self._origin(placement, size, max_width, block_height)
         block_box = self._block_box(x, y, max_width, block_height, anchor, size)
         fill, stroke, veil = self._colors(image, block_box, force_light=style == "artistic title")
+        artistic_accent = self._artistic_accent(image, block_box) if style == "artistic title" else None
+        if artistic_accent:
+            fill = tuple(round(fill[index] * .90 + artistic_accent[index] * .10) for index in range(3)) + (255,)
 
         overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
@@ -62,6 +77,34 @@ class TypographyEngine:
             veil_layer.putalpha(veil_mask)
             overlay = Image.alpha_composite(overlay, veil_layer)
             draw = ImageDraw.Draw(overlay)
+        if artistic_accent:
+            accent_mask = Image.new("L", canvas.size, 0)
+            accent_draw = ImageDraw.Draw(accent_mask)
+            accent_y = y
+            for line, box in zip(lines, boxes):
+                line_width = box[2] - box[0]
+                line_height = box[3] - box[1]
+                line_x = self._line_x(x, line_width, anchor, size)
+                accent_draw.text(
+                    (line_x, accent_y - box[1]),
+                    line,
+                    font=font,
+                    fill=150,
+                    stroke_width=max(1, size // 360),
+                    stroke_fill=105,
+                )
+                accent_y += line_height + line_gap
+            if artist_text:
+                artist_width = draw_probe.textlength(artist_text, font=artist_font)
+                artist_x = self._line_x(x, artist_width, anchor, size)
+                accent_draw.text(
+                    (artist_x, accent_y + artist_font.size * .25), artist_text, font=artist_font, fill=125
+                )
+            accent_mask = accent_mask.filter(ImageFilter.GaussianBlur(max(2, int(size * .007))))
+            accent_layer = Image.new("RGBA", canvas.size, (*artistic_accent, 0))
+            accent_layer.putalpha(accent_mask)
+            overlay = Image.alpha_composite(overlay, accent_layer)
+            draw = ImageDraw.Draw(overlay)
         cursor_y = y
         for line, box in zip(lines, boxes):
             line_width = box[2] - box[0]
@@ -72,7 +115,7 @@ class TypographyEngine:
                 line,
                 font=font,
                 fill=fill,
-                stroke_width=max(1, size // 500),
+                stroke_width=max(1, size // (430 if style == "artistic title" else 500)),
                 stroke_fill=stroke,
             )
             cursor_y += line_height + line_gap
@@ -96,6 +139,7 @@ class TypographyEngine:
             "line_count": len(lines),
             "safe_area": tuple(round(value, 1) for value in block_box),
             "adaptive_veil": bool(veil),
+            "background_accent": artistic_accent,
         }
         return Image.alpha_composite(canvas, overlay).convert("RGB")
 
@@ -193,12 +237,29 @@ class TypographyEngine:
             veil = (255, 255, 255, 62) if variation > 46 else None
         return fill, stroke, veil
 
-    def _fit(self, text, max_width, max_height, canvas_size, base_scale):
+    @staticmethod
+    def _artistic_accent(image, block_box):
+        crop = image.crop(tuple(int(value) for value in block_box)).convert("RGB").resize((48, 48))
+        colors = crop.quantize(colors=10, method=Image.Quantize.MEDIANCUT).convert("RGB").getcolors(48 * 48)
+        if not colors:
+            return None
+
+        def score(item):
+            count, (red, green, blue) = item
+            high, low = max(red, green, blue), min(red, green, blue)
+            saturation = high - low
+            brightness = (red + green + blue) / 3
+            usable_light = 1.0 - min(abs(brightness - 145) / 180, .75)
+            return saturation * usable_light * (1.0 + count / (48 * 48))
+
+        return max(colors, key=score)[1]
+
+    def _fit(self, text, max_width, max_height, canvas_size, base_scale, font_candidates=None):
         words = text.replace("_", " ").split()
         minimum = int(canvas_size * .018)
         maximum = int(canvas_size * base_scale)
         for font_size in range(maximum, minimum - 1, -2):
-            font = self._font(font_size)
+            font = self._font(font_size, font_candidates)
             lines = self._wrap(words, font, max_width)
             draw = ImageDraw.Draw(Image.new("L", (4, 4)))
             boxes = [draw.textbbox((0, 0), line, font=font) for line in lines]
@@ -209,16 +270,16 @@ class TypographyEngine:
             )
             if len(lines) <= 4 and height <= max_height and not orphan_fragment:
                 return font, lines
-        font = self._font(minimum)
+        font = self._font(minimum, font_candidates)
         return font, self._wrap(words, font, max_width)
 
-    def _fit_single_line(self, text, max_width, maximum, minimum):
+    def _fit_single_line(self, text, max_width, maximum, minimum, font_candidates=None):
         draw = ImageDraw.Draw(Image.new("L", (4, 4)))
         for size in range(maximum, minimum - 1, -1):
-            font = self._font(size)
+            font = self._font(size, font_candidates)
             if draw.textlength(text, font=font) <= max_width:
                 return font
-        return self._font(minimum)
+        return self._font(minimum, font_candidates)
 
     def _wrap(self, words, font, max_width):
         draw = ImageDraw.Draw(Image.new("L", (4, 4)))
@@ -257,8 +318,8 @@ class TypographyEngine:
         return pieces
 
     @staticmethod
-    def _font(size):
-        for candidate in FONT_CANDIDATES:
+    def _font(size, candidates=None):
+        for candidate in candidates or FONT_CANDIDATES:
             if Path(candidate).exists():
                 return ImageFont.truetype(candidate, size)
         return ImageFont.load_default()

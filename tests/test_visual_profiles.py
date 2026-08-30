@@ -161,5 +161,20 @@ class VisualProfileTests(unittest.TestCase):
         self.assertLessEqual(engine.last_layout["line_count"], 4)
         self.assertTrue(all(0 <= value <= 512 for value in engine.last_layout["safe_area"]))
 
+    def test_artistic_title_uses_background_accent_and_safe_bold_layout(self):
+        engine = TypographyEngine()
+        image = Image.new("RGB", (512, 512), "#261447")
+        result = engine.compose(
+            image,
+            "Bring Me To Life",
+            profile=SimpleNamespace(typography_style="artistic title", text_position="center"),
+            show_artist=False,
+            language="en",
+        )
+        self.assertEqual(result.size, image.size)
+        self.assertEqual(engine.last_layout["style"], "artistic title")
+        self.assertIsNotNone(engine.last_layout["background_accent"])
+        self.assertTrue(all(0 <= value <= 512 for value in engine.last_layout["safe_area"]))
+
 if __name__ == "__main__":
     unittest.main()
