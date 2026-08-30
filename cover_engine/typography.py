@@ -9,8 +9,8 @@ FONT_CANDIDATES = (
     "C:/Windows/Fonts/dejavusans-bold.ttf",
 )
 ARTISTIC_FONT_CANDIDATES = (
-    "C:/Windows/Fonts/segoeuib.ttf",
     "C:/Windows/Fonts/arialbd.ttf",
+    "C:/Windows/Fonts/segoeuib.ttf",
     "C:/Windows/Fonts/ariblk.ttf",
 )
 
@@ -20,7 +20,7 @@ STYLE_SCALE = {
     "compact title": .058,
     "editorial title": .068,
     "expressive title": .064,
-    "artistic title": .145,
+    "artistic title": .150,
 }
 
 
@@ -37,7 +37,7 @@ class TypographyEngine:
         style = getattr(profile, "typography_style", "compact title")
         preferred = getattr(profile, "text_position", "bottom")
         placement = "center" if style == "artistic title" else self._safe_placement(image, preferred)
-        max_width = int(size * (.78 if style == "artistic title" else (.56 if placement in ("left", "right") else .68)))
+        max_width = int(size * (.82 if style == "artistic title" else (.56 if placement in ("left", "right") else .68)))
         max_height = int(size * (.52 if style == "artistic title" else (.21 if style == "editorial title" else .18)))
         base_scale = STYLE_SCALE.get(style, .088)
         display_title = self._display_title(title.strip(), style, language)
@@ -64,7 +64,10 @@ class TypographyEngine:
         fill, stroke, veil = self._colors(image, block_box, force_light=style == "artistic title")
         artistic_accent = self._artistic_accent(image, block_box) if style == "artistic title" else None
         if artistic_accent:
-            fill = tuple(round(fill[index] * .90 + artistic_accent[index] * .10) for index in range(3)) + (255,)
+            fill = tuple(round(fill[index] * .82 + artistic_accent[index] * .18) for index in range(3)) + (255,)
+            stroke = tuple(round(stroke[index] * .70 + artistic_accent[index] * .30) for index in range(3)) + (185,)
+            if veil:
+                veil = tuple(round(veil[index] * .78 + artistic_accent[index] * .22) for index in range(3)) + (veil[3],)
 
         overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
@@ -89,9 +92,9 @@ class TypographyEngine:
                     (line_x, accent_y - box[1]),
                     line,
                     font=font,
-                    fill=150,
+                    fill=180,
                     stroke_width=max(1, size // 360),
-                    stroke_fill=105,
+                    stroke_fill=130,
                 )
                 accent_y += line_height + line_gap
             if artist_text:
@@ -100,7 +103,7 @@ class TypographyEngine:
                 accent_draw.text(
                     (artist_x, accent_y + artist_font.size * .25), artist_text, font=artist_font, fill=125
                 )
-            accent_mask = accent_mask.filter(ImageFilter.GaussianBlur(max(2, int(size * .007))))
+            accent_mask = accent_mask.filter(ImageFilter.GaussianBlur(max(2, int(size * .009))))
             accent_layer = Image.new("RGBA", canvas.size, (*artistic_accent, 0))
             accent_layer.putalpha(accent_mask)
             overlay = Image.alpha_composite(overlay, accent_layer)
