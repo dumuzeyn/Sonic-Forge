@@ -471,11 +471,22 @@ class SonicForgeView(ttk.Frame):
         self.cover_preview_image.pack(fill=tk.BOTH, expand=True)
         preview_actions = ttk.Frame(preview, style="Surface.TFrame")
         preview_actions.pack(fill=tk.X, pady=(SPACING["sm"], 0))
-        self.cover_preview_button = self._localize(ttk.Button(preview_actions, command=self.app.preview_cover), "cover_preview")
-        self.cover_variant_button = self._localize(ttk.Button(preview_actions, command=lambda: self.app.preview_cover(True)), "cover_new_variant")
-        self.cover_preview_button.pack(side=tk.LEFT, padx=(0, SPACING["sm"]))
-        self.cover_variant_button.pack(side=tk.LEFT)
-        self.cover_controls.extend((self.cover_preview_button, self.cover_variant_button))
+        self.cover_quick_button = self._localize(
+            ttk.Button(preview_actions, command=lambda: self.app.preview_cover(quick=True)),
+            "cover_quick_preview",
+        )
+        self.cover_variant_button = self._localize(
+            ttk.Button(preview_actions, command=lambda: self.app.preview_cover(True, True)),
+            "cover_new_variant",
+        )
+        self.cover_preview_button = self._localize(
+            ttk.Button(preview_actions, style="Primary.TButton", command=self.app.preview_cover),
+            "cover_preview",
+        )
+        self.cover_quick_button.pack(fill=tk.X)
+        self.cover_variant_button.pack(fill=tk.X, pady=(SPACING["xs"], 0))
+        self.cover_preview_button.pack(fill=tk.X, pady=(SPACING["xs"], 0))
+        self.cover_controls.extend((self.cover_quick_button, self.cover_preview_button, self.cover_variant_button))
 
         descriptions = self._section(frame, "song_descriptions", 1, 0, columnspan=2, sticky="ew", pady=(SPACING["md"], 0))
         descriptions.columnconfigure(0, weight=1)
@@ -774,6 +785,8 @@ class SonicForgeView(ttk.Frame):
 
     def set_cover_preview_busy(self, busy):
         state = tk.DISABLED if busy else tk.NORMAL
+        is_m2p = self.app.cover_choice("engine", self.app.cover_engine_var.get()) == "music2picture_v2"
+        self.cover_quick_button.configure(state=tk.NORMAL if not busy and is_m2p else tk.DISABLED)
         self.cover_preview_button.configure(state=state)
         self.cover_variant_button.configure(state=state)
 
@@ -794,6 +807,7 @@ class SonicForgeView(ttk.Frame):
     def update_engine_dependencies(self):
         is_ai = self.app.cover_choice("engine", self.app.cover_engine_var.get()) == "ai"
         self.model_button.configure(state=tk.NORMAL if is_ai and not self.busy else tk.DISABLED)
+        self.cover_quick_button.configure(state=tk.DISABLED if is_ai or self.busy else tk.NORMAL)
 
     def set_description_results(self, records):
         mapping = {}

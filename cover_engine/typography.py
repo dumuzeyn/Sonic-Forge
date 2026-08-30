@@ -15,6 +15,7 @@ STYLE_SCALE = {
     "compact title": .058,
     "editorial title": .068,
     "expressive title": .064,
+    "artistic title": .145,
 }
 
 
@@ -30,9 +31,9 @@ class TypographyEngine:
         size = canvas.width
         style = getattr(profile, "typography_style", "compact title")
         preferred = getattr(profile, "text_position", "bottom")
-        placement = self._safe_placement(image, preferred)
-        max_width = int(size * (.56 if placement in ("left", "right") else .68))
-        max_height = int(size * (.21 if style == "editorial title" else .18))
+        placement = "center" if style == "artistic title" else self._safe_placement(image, preferred)
+        max_width = int(size * (.78 if style == "artistic title" else (.56 if placement in ("left", "right") else .68)))
+        max_height = int(size * (.52 if style == "artistic title" else (.21 if style == "editorial title" else .18)))
         base_scale = STYLE_SCALE.get(style, .088)
         display_title = self._display_title(title.strip(), style, language)
         font, lines = self._fit(display_title, max_width, max_height, size, base_scale)
@@ -48,12 +49,19 @@ class TypographyEngine:
         block_height = title_height + artist_height
         x, y, anchor = self._origin(placement, size, max_width, block_height)
         block_box = self._block_box(x, y, max_width, block_height, anchor, size)
-        fill, stroke, veil = self._colors(image, block_box)
+        fill, stroke, veil = self._colors(image, block_box, force_light=style == "artistic title")
 
         overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
         if veil:
-            draw.rectangle(block_box, fill=veil)
+            veil_mask = Image.new("L", canvas.size, 0)
+            mask_draw = ImageDraw.Draw(veil_mask)
+            mask_draw.rounded_rectangle(block_box, radius=int(size * .035), fill=veil[3])
+            veil_mask = veil_mask.filter(ImageFilter.GaussianBlur(max(3, int(size * .028))))
+            veil_layer = Image.new("RGBA", canvas.size, (*veil[:3], 0))
+            veil_layer.putalpha(veil_mask)
+            overlay = Image.alpha_composite(overlay, veil_layer)
+            draw = ImageDraw.Draw(overlay)
         cursor_y = y
         for line, box in zip(lines, boxes):
             line_width = box[2] - box[0]
@@ -93,6 +101,8 @@ class TypographyEngine:
 
     @staticmethod
     def _display_title(title, style, language):
+        if style == "artistic title":
+            return title.replace("_", " ").upper()
         if style == "editorial title" and len(title) <= 34:
             return title.upper()
         if language == "mixed":
@@ -162,13 +172,18 @@ class TypographyEngine:
         )
 
     @staticmethod
-    def _colors(image, block_box):
+    def _colors(image, block_box, force_light=False):
         crop = image.crop(tuple(int(value) for value in block_box)).convert("RGB")
         gray = crop.convert("L")
         stat = ImageStat.Stat(gray)
         mean = stat.mean[0]
         variation = stat.stddev[0]
-        if mean < 132:
+        if force_light:
+            fill = (250, 250, 248, 255)
+            stroke = (5, 7, 11, 145)
+            veil_alpha = int(max(34, min(82, 35 + (mean - 70) * .28 + variation * .30)))
+            veil = (5, 7, 12, veil_alpha)
+        elif mean < 132:
             fill = (250, 250, 248, 255)
             stroke = (8, 10, 14, 210)
             veil = (5, 7, 12, 66) if variation > 46 else None
@@ -188,7 +203,11 @@ class TypographyEngine:
             draw = ImageDraw.Draw(Image.new("L", (4, 4)))
             boxes = [draw.textbbox((0, 0), line, font=font) for line in lines]
             height = sum(box[3] - box[1] for box in boxes) + max(0, len(lines)-1) * int(font_size*.11)
-            if len(lines) <= 4 and height <= max_height:
+            orphan_fragment = any(
+                len(line.strip()) <= 2 and line.strip() not in {"×", "X", "&"}
+                for line in lines
+            )
+            if len(lines) <= 4 and height <= max_height and not orphan_fragment:
                 return font, lines
         font = self._font(minimum)
         return font, self._wrap(words, font, max_width)

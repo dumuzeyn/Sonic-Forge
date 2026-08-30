@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 from music2picture_v2 import (
     DEFAULT_PIPELINE,
@@ -13,6 +14,7 @@ from music2picture_v2 import (
     generate_descriptions,
     render_cover,
 )
+from music2picture_v2.renderer import GENERATOR_VERSION, artistic_parameters, deterministic_seed
 
 
 STARTUP_KWARGS = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
@@ -50,6 +52,7 @@ def make_cover(
     cancel_event=None,
     regenerate_description=False,
     candidate_limit=None,
+    preview=False,
     **_compatibility,
 ):
     """Analyze one track, persist its text artifacts, then render with one engine."""
@@ -100,7 +103,13 @@ def make_cover(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if engine == ENGINE_MUSIC2PICTURE_V2:
         print("Движок обложки: Music2Picture v2")
-        image = render_cover(bundle.visual_dna, bundle.visual_plan, size=size, seed=seed)
+        image = render_cover(
+            bundle.visual_dna,
+            bundle.visual_plan,
+            size=size,
+            seed=seed,
+            preview=preview,
+        )
         if text_mode != "none":
             from cover_engine.typography import TypographyEngine
 
@@ -108,12 +117,16 @@ def make_cover(
                 image,
                 title,
                 artist,
+                profile=SimpleNamespace(
+                    typography_style="artistic title",
+                    text_position="center",
+                ),
                 enabled=True,
                 show_artist=text_mode == "title_artist",
                 language=bundle.language,
             )
         image.save(output_path, "PNG", optimize=True)
-        _save_music2picture_profile(output_path, path, bundle, seed, text_mode)
+        _save_music2picture_profile(output_path, path, bundle, seed, text_mode, preview)
         print(f"Обложка сохранена: {output_path} (Music2Picture v2)")
         return output_path
 
@@ -332,7 +345,7 @@ def apply_generated_covers(audio_root, generated_root, published_root, size=1000
     return applied
 
 
-def _save_music2picture_profile(output_path, audio_path, bundle, seed, text_mode):
+def _save_music2picture_profile(output_path, audio_path, bundle, seed, text_mode, preview=False):
     import json
 
     directory = output_path.parent / ".sonicforge"
@@ -342,6 +355,13 @@ def _save_music2picture_profile(output_path, audio_path, bundle, seed, text_mode
         "audio_path": str(audio_path),
         "seed": seed,
         "text_mode": text_mode,
+        "generator_version": GENERATOR_VERSION,
+        "preview": bool(preview),
+        "artistic_parameters": artistic_parameters(
+            bundle.visual_dna,
+            bundle.visual_plan,
+            deterministic_seed(bundle.visual_dna.fingerprint, seed),
+        ).to_dict(),
         "analysis_bundle": bundle.to_dict(),
     }
     target = directory / f"{output_path.stem}.profile.json"

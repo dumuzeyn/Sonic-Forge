@@ -137,7 +137,8 @@ class VisualPlan:
     visual_weight: float
     spatial_balance: float
     directionality: float
-    palette: tuple[str, str, str, str]
+    palette_scheme: str
+    palette: tuple[str, ...]
     lighting: str
 
     def to_dict(self) -> dict[str, Any]:

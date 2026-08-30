@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import random
+
 from .models import VisualDNA, VisualPlan
 from .utils import clamp, hsv_hex
 
@@ -22,9 +25,11 @@ KEY_HUES = {
 
 def build_visual_plan(dna: VisualDNA, variation: int = 0) -> VisualPlan:
     anchor = KEY_HUES.get(dna.key, 210.0)
+    fingerprint_digest = hashlib.sha256(dna.fingerprint.encode("utf-8", errors="replace")).digest()
+    fingerprint_shift = (int.from_bytes(fingerprint_digest[:2], "little") % 111) - 55
     emotional_shift = (dna.warmth - 0.5) * 48.0 + (dna.valence - 0.5) * 34.0
     variation_shift = ((variation * 47) % 71) - 35 if variation else 0
-    primary_hue = (anchor + emotional_shift + variation_shift) % 360.0
+    primary_hue = (anchor + emotional_shift + variation_shift + fingerprint_shift) % 360.0
     palette_width = clamp(0.20 + dna.harmonic_complexity * 0.42 + dna.dissonance * 0.38)
     separation = 28.0 + palette_width * 112.0
     secondary_hue = (primary_hue + separation * (1.0 if variation % 2 == 0 else -1.0)) % 360.0
@@ -57,14 +62,8 @@ def build_visual_plan(dna: VisualDNA, variation: int = 0) -> VisualPlan:
         f"density {density:.2f}, flow {flow:.2f}, fragmentation {fragmentation:.2f}"
     )
 
-    dark_value = clamp(luminance * (0.38 + (1.0 - contrast) * 0.18), 0.10, 0.48)
-    base_value = clamp(luminance * (0.82 + (1.0 - contrast) * 0.12), 0.25, 0.82)
-    light_value = clamp(luminance + 0.24 + contrast * 0.12, 0.52, 0.98)
-    palette = (
-        hsv_hex(primary_hue, saturation * 0.66, dark_value),
-        hsv_hex(primary_hue, saturation, base_value),
-        hsv_hex(secondary_hue, clamp(saturation * 0.88), light_value),
-        hsv_hex(accent_hue, clamp(saturation + 0.16), clamp(light_value + 0.08)),
+    palette_scheme, palette = _build_palette(
+        dna, primary_hue, saturation, luminance, contrast, variation
     )
     lighting = _lighting(dna, contrast)
     return VisualPlan(
@@ -94,6 +93,7 @@ def build_visual_plan(dna: VisualDNA, variation: int = 0) -> VisualPlan:
         visual_weight=visual_weight,
         spatial_balance=spatial_balance,
         directionality=directionality,
+        palette_scheme=palette_scheme,
         palette=palette,
         lighting=lighting,
     )
@@ -128,3 +128,81 @@ def _lighting(dna: VisualDNA, contrast: float) -> str:
     if dna.section_contrast > 0.60:
         return "alternating pools of light that mirror section-to-section contrast"
     return "balanced directional light with a clear focal gradient"
+
+
+def _build_palette(dna, primary_hue, saturation, luminance, contrast, variation):
+    digest = hashlib.sha256(
+        f"palette-v3|{dna.fingerprint}|{variation}|{dna.key}|{dna.mode}".encode("utf-8")
+    ).digest()
+    rng = random.Random(int.from_bytes(digest[:8], "little"))
+    if dna.spectral_flatness > 0.64 or dna.aggressiveness > 0.68:
+        candidates = ("dark_neon", "high_contrast", "saturated", "complementary", "triadic")
+    elif dna.relaxation > 0.66 or dna.acousticness > 0.68:
+        candidates = ("analogous", "pastel", "muted", "cold_dominant", "split_complementary")
+    elif dna.valence > 0.64:
+        candidates = ("triadic", "warm_dominant", "pastel", "saturated", "complementary")
+    else:
+        candidates = (
+            "split_complementary", "dark_neon", "analogous", "triadic",
+            "cold_dominant", "warm_dominant", "high_contrast",
+        )
+    scheme = rng.choice(candidates)
+    offsets = {
+        "analogous": (-58, -30, 0, 24, 52, 76),
+        "complementary": (-24, 0, 22, 154, 180, 206),
+        "split_complementary": (-28, 0, 25, 138, 218, 244),
+        "triadic": (-18, 0, 34, 116, 222, 250),
+        "dark_neon": (-36, 0, 42, 128, 178, 238),
+        "pastel": (-42, -18, 12, 72, 142, 214),
+        "muted": (-54, -20, 16, 62, 154, 224),
+        "warm_dominant": (-34, -12, 10, 34, 58, 172),
+        "cold_dominant": (-44, -16, 12, 46, 82, 178),
+        "high_contrast": (-18, 0, 34, 162, 184, 218),
+        "saturated": (-48, -10, 28, 88, 152, 218),
+    }[scheme]
+    count = rng.choices((3, 4, 5, 6), weights=(1, 4, 4, 1), k=1)[0]
+    selected = list(offsets)
+    while len(selected) < count:
+        selected.append(rng.uniform(-180, 180))
+    rng.shuffle(selected)
+    selected = selected[:count]
+    selected[0] = 0
+    colors = []
+    for index, offset in enumerate(selected):
+        hue = (primary_hue + offset + rng.uniform(-8, 8)) % 360
+        if scheme == "warm_dominant":
+            hue = (22.0 + offset + rng.uniform(-7, 7)) % 360
+            sat = rng.uniform(0.68, 0.98)
+            value = rng.uniform(0.16, 0.34) if index == 0 else rng.uniform(0.62, 0.98)
+        elif scheme == "cold_dominant":
+            hue = (212.0 + offset + rng.uniform(-8, 8)) % 360
+            sat = rng.uniform(0.54, 0.94)
+            value = rng.uniform(0.14, 0.32) if index == 0 else rng.uniform(0.58, 0.96)
+        elif scheme == "high_contrast":
+            sat = rng.uniform(0.72, 1.0)
+            value = rng.uniform(0.10, 0.24) if index == 0 else rng.uniform(0.76, 1.0)
+        elif scheme == "saturated":
+            sat = rng.uniform(0.78, 1.0)
+            value = rng.uniform(0.14, 0.32) if index == 0 else rng.uniform(0.66, 1.0)
+        elif scheme == "dark_neon":
+            sat = clamp(saturation * rng.uniform(1.02, 1.35), 0.62, 1.0)
+            value = rng.uniform(0.16, 0.40) if index == 0 else rng.uniform(0.62, 0.98)
+        elif scheme == "pastel":
+            sat = clamp(saturation * rng.uniform(0.46, 0.74), 0.24, 0.68)
+            value = rng.uniform(0.28, 0.48) if index == 0 else rng.uniform(0.72, 0.96)
+        elif scheme == "muted":
+            sat = clamp(saturation * rng.uniform(0.48, 0.78), 0.22, 0.70)
+            value = rng.uniform(0.18, 0.38) if index == 0 else rng.uniform(0.46, 0.80)
+        else:
+            sat = clamp(saturation * rng.uniform(0.90, 1.28), 0.52, 1.0)
+            value = rng.uniform(0.13, 0.36) if index == 0 else clamp(
+                luminance + rng.uniform(-0.04, 0.38) + contrast * 0.12, 0.48, 0.98
+            )
+        colors.append(hsv_hex(hue, sat, value))
+    if scheme not in {"muted", "pastel"}:
+        colors[-1] = hsv_hex(
+            (primary_hue + selected[-1] + rng.uniform(-6, 6)) % 360,
+            clamp(saturation + 0.18, 0.55, 1.0),
+            clamp(0.82 + contrast * 0.16, 0.82, 1.0),
+        )
+    return scheme, tuple(colors)

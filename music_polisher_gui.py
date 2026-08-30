@@ -1,7 +1,6 @@
 import os
 import math
 import queue
-import secrets
 import sys
 import threading
 import traceback
@@ -870,7 +869,7 @@ class SonicForgeApp(tk.Tk):
         )
         self.worker.start()
 
-    def preview_cover(self, new_variant=False):
+    def preview_cover(self, new_variant=False, quick=False):
         if self.worker and self.worker.is_alive():
             return
         source = self._single_audio_source()
@@ -879,15 +878,19 @@ class SonicForgeApp(tk.Tk):
         engine = self.cover_choice("engine", self.cover_engine_var.get())
         try:
             seed = self._parse_seed()
-            if seed is None or new_variant:
-                seed = secrets.randbelow(2_000_000_000)
-                self.seed_var.set(str(seed))
-            size = int(self.cover_size_var.get())
+            seed = 0 if seed is None else seed
+            if new_variant:
+                seed = (seed + 1) % 2_000_000_000
+            self.seed_var.set(str(seed))
+            size = 384 if quick else int(self.cover_size_var.get())
         except (ValueError, tk.TclError):
             messagebox.showerror(self.app_name(), self.t("bad_seed"))
             return
         output = self.output_var.get().strip()
-        cover_dir = Path(output).expanduser() / "covers" if output else source.parent
+        if quick:
+            cover_dir = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "SonicForge" / "cover_preview"
+        else:
+            cover_dir = Path(output).expanduser() / "covers" if output else source.parent
         suffix = f"_{seed}" if new_variant else ""
         preview_path = cover_dir / f"{source.stem}_cover_{size}{suffix}.png"
         lyrics_text = self.view.get_lyrics_text() if self.use_lyrics_for_cover_var.get() else ""
@@ -910,13 +913,14 @@ class SonicForgeApp(tk.Tk):
                 mood,
                 engine,
                 bool(self.embed_cover_var.get()),
+                quick,
             ),
             daemon=True,
         )
         self.worker.start()
 
     def _cover_preview_worker(
-        self, source, preview_path, size, seed, lyrics_text, detail, text_mode, mood, engine, embed
+        self, source, preview_path, size, seed, lyrics_text, detail, text_mode, mood, engine, embed, quick
     ):
         old_stdout, old_stderr = sys.stdout, sys.stderr
         sys.stdout = QueueWriter(self.log_queue)
@@ -934,9 +938,10 @@ class SonicForgeApp(tk.Tk):
                 engine=engine,
                 cancel_event=self.cancel_event,
                 candidate_limit=1,
+                preview=quick,
             )
-            embedded = bool(embed and music2picture.embed_cover(source, preview_path))
-            self.log_queue.put(("__COVER_PREVIEW__", preview_path, embedded, embed))
+            embedded = bool(not quick and embed and music2picture.embed_cover(source, preview_path))
+            self.log_queue.put(("__COVER_PREVIEW__", preview_path, embedded, embed and not quick))
         except Exception as exc:
             if not self.cancel_event.is_set():
                 self.log_queue.put(("__ERROR__", str(exc)))

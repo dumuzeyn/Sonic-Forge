@@ -56,7 +56,11 @@
 
 ### Music2Picture v2
 
-Встроенный локальный движок не требует отдельной модели. В нём один универсальный параметрический режим без Aurora, Plasma, Ocean и Fusion. Геометрия, композиция, фактура, плотность, палитра, фокус и движение непрерывно вычисляются из `VisualDNA` и `VisualPlan`, поэтому песня не назначается одному из нескольких шаблонов.
+Встроенный локальный движок не требует отдельной модели и интернета. Основной режим **Artistic Texture v3** создаёт насыщенную абстрактную живопись из крупных цветовых масс, текучих переходов, органических завихрений, мелких прожилок и мягкого зерна. Старые Aurora, Plasma, Ocean, Fusion и waveform-подобные стили не используются.
+
+Темп, энергия, бас, динамика и спектральный характер управляют масштабом, турбулентностью, направлением потоков, детализацией и контрастом художественно, а не рисуются в виде графика. Для каждого трека строится гармоничная палитра из 3–7 оттенков и выбирается одна из пяти пространственных композиций. Отпечаток аудио, версия генератора и номер варианта образуют постоянный seed: одинаковые исходник и настройки дают одинаковую обложку.
+
+**Быстрый просмотр** строит вариант в размере 384×384 во временной папке. **Новый вариант** увеличивает номер вариации предсказуемо, а **Создать обложку** выводит выбранный вариант в заданном полном размере. Все эти операции выполняются в фоновом потоке и не замораживают окно.
 
 ## Анализ песни
 
@@ -106,7 +110,7 @@ Audio
 2. Откройте вкладку **Обложка** и выберите движок.
 3. Нажмите **Создать обложку**.
 
-PNG сохранится рядом с песней. Если указана папка назначения, он попадёт в её подпапку `covers`. Галочка **Встроить в файл** также добавляет созданную обложку в выбранный MP3. Кнопка **Новый вариант** сохраняет отдельную вариацию и не требует запуска остальных этапов.
+PNG сохранится рядом с песней. Если указана папка назначения, он попадёт в её подпапку `covers`. Галочка **Встроить в файл** также добавляет созданную обложку в выбранный MP3. Для Music2Picture можно сначала нажать **Быстрый просмотр**, выбрать **Новый вариант**, а затем выполнить **Создать обложку** в полном качестве. Эти действия не требуют запуска остальных этапов.
 
 ### Полная обработка
 
@@ -179,7 +183,11 @@ Audio -> Audio Analysis -> VisualDNA -> Song Description
 -> Visual Brief + VisualPlan -> selected cover engine
 ```
 
-AI Cover Generation uses a local `stable-diffusion.cpp` model to create cinematic, surreal, or editorial scenes and then applies quality control and optional typography. Music2Picture v2 is a built-in procedural renderer with one adaptive parametric system. It has no Aurora, Plasma, Ocean, or Fusion user modes.
+AI Cover Generation uses a local `stable-diffusion.cpp` model to create cinematic, surreal, or editorial scenes and then applies quality control and optional typography.
+
+Music2Picture v2 uses the built-in **Artistic Texture v3** renderer. It creates layered fluid, marbled, and turbulent artwork locally from macro color masses, meso-scale flows, and micro detail; it never draws a waveform or spectrum. Audio features control texture scale, flow, turbulence, contrast, detail, and a deterministic 3–7 color palette. Five spatial composition families prevent every track from becoming a recolored copy of one template.
+
+**Quick preview** renders a deterministic 384×384 draft. **New variant** advances the stable variation number, while **Create cover** renders that selected variant at full quality. Cover work stays off the UI thread.
 
 The analysis keeps absolute loudness, local dynamics, global structure, rhythm, timbre, harmony, key, section contrast, and spectral change as distinct evidence. Audio dominates VisualDNA; metadata and existing lyrics provide bounded semantic guidance.
 

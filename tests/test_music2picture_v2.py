@@ -20,6 +20,7 @@ from music2picture_v2 import (
     render_cover,
     visual_plan_distance,
 )
+from music2picture_v2.renderer import COMPOSITIONS, artistic_parameters, deterministic_seed
 
 
 class StubValue:
@@ -111,6 +112,46 @@ class Music2PictureV2Tests(unittest.TestCase):
         different = render_cover(right_dna, build_visual_plan(right_dna), size=192, seed=42)
         self.assertIsNone(ImageChops.difference(first, repeated).getbbox())
         self.assertGreater(sum(ImageStat.Stat(ImageChops.difference(first, different)).mean), 8.0)
+
+    def test_artistic_renderer_has_no_signal_trace_drawing(self):
+        source = (Path(music2picture_v2.__file__).parent / "renderer.py").read_text(encoding="utf-8").lower()
+        for forbidden in ("draw.line", "waveform", "oscillogram", "spectrum graph", "energy_curve["):
+            self.assertNotIn(forbidden, source)
+
+    def test_seed_combines_track_fingerprint_and_variation(self):
+        self.assertEqual(deterministic_seed("track-a", 4), deterministic_seed("track-a", 4))
+        self.assertNotEqual(deterministic_seed("track-a", 4), deterministic_seed("track-b", 4))
+        self.assertNotEqual(deterministic_seed("track-a", 4), deterministic_seed("track-a", 5))
+
+    def test_palette_and_composition_vary_across_distinct_signals(self):
+        sample_rate = 8000
+        time = np.arange(sample_rate * 2) / sample_rate
+        rng = np.random.default_rng(7)
+        signals = (
+            np.zeros(sample_rate),
+            np.sin(2 * np.pi * 60 * time) * 0.6,
+            np.sin(2 * np.pi * 440 * time) * 0.3,
+            rng.normal(0, 0.2, time.size),
+            np.sin(2 * np.pi * (80 + time * 500) * time) * 0.5,
+            ((np.arange(time.size) % 400) < 10) * 0.8,
+            np.sin(2 * np.pi * 180 * time) * np.linspace(0.02, 0.9, time.size),
+            np.sin(2 * np.pi * 900 * time) * 0.2,
+        )
+        schemes = set()
+        compositions = set()
+        palettes = set()
+        for signal in signals:
+            dna = build_visual_dna(analyze_audio_array(np.asarray(signal, dtype=np.float32), sample_rate))
+            plan = build_visual_plan(dna)
+            params = artistic_parameters(dna, plan, deterministic_seed(dna.fingerprint, 0))
+            self.assertGreaterEqual(len(plan.palette), 3)
+            self.assertLessEqual(len(plan.palette), 7)
+            schemes.add(plan.palette_scheme)
+            compositions.add(params.composition)
+            palettes.add(plan.palette)
+        self.assertGreaterEqual(len(schemes), 4)
+        self.assertGreaterEqual(len(compositions), len(COMPOSITIONS) - 1)
+        self.assertEqual(len(palettes), len(signals))
 
     def test_text_first_stage_order(self):
         self.assertLess(STAGE_ORDER.index("building_visual_dna"), STAGE_ORDER.index("creating_song_description"))
