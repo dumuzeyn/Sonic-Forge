@@ -90,12 +90,12 @@ class CoverProviderTests(unittest.TestCase):
             self.assertEqual(status.model_path, model.resolve())
             self.assertNotEqual(status.model_path.parent, manager.root)
 
-    def test_executable_does_not_bundle_clip_or_torch(self):
+    def test_executable_bundles_semantic_runtime(self):
         root = Path(__file__).resolve().parents[1]
         requirements = (root / "requirements.txt").read_text(encoding="utf-8").lower()
         specification = (root / "SonicForge.spec").read_text(encoding="utf-8").lower()
-        self.assertNotIn("open_clip_torch", requirements)
-        self.assertNotIn("collect_dynamic_libs('torch')", specification)
+        self.assertIn("open_clip_torch", requirements)
+        self.assertIn("collect_dynamic_libs('torch')", specification)
         self.assertIn("'open_clip'", specification)
         self.assertIn("'torch'", specification)
 

@@ -64,6 +64,15 @@ class VisualProfile:
     song_description: str = ""
     visual_brief: str = ""
     visual_plan: dict | None = None
+    narrative_mode: str = "reflective"
+    core_emotional_thesis: str = ""
+    visual_metaphor: str = ""
+    scene_suggestion: str = ""
+    subject_emphasis: str = ""
+    mood_arc: str = ""
+    abstraction_level: str = "balanced realism"
+    human_presence_suggestion: str = "optional indirect human trace"
+    typography_mood_hint: str = "restrained editorial"
 
     def to_dict(self):
         return asdict(self)
@@ -74,7 +83,7 @@ THEME_RULES = (
     (("ноч", "night", "moon", "луна", "темн"), "night", ("moonlight", "wet reflections", "sleeping windows"), ("night city", "moonlit field"), ("moon", "street lamp", "window"), ("visibility against darkness",)),
     (("люб", "love", "heart", "серд", "kiss", "поцел"), "love", ("touch", "shared warmth", "fragile closeness"), ("private room", "summer garden"), ("letter", "flower", "two chairs"), ("closeness against separation",)),
     (("огонь", "fire", "burn", "flame", "плам", "пеп"), "fire", ("embers", "smoke", "heat distortion"), ("burned field", "ceremonial hall"), ("match", "charred crown", "burning photograph"), ("destruction against renewal",)),
-    (("дорог", "road", "drive", "train", "поезд", "путь", "car", "машин"), "journey", ("passing lights", "tracks", "distant destination"), ("railway platform", "open road", "moving carriage"), ("train", "road sign", "suitcase", "car"), ("departure against return",)),
+    (("дорог", "road", "drive", "train", "поезд", "путь", "car", "машин", "верн", "return", "come back"), "journey", ("passing lights", "tracks", "distant destination"), ("railway platform", "open road", "moving carriage"), ("train", "road sign", "suitcase", "car"), ("departure against return",)),
     (("дожд", "rain", "storm", "гроза"), "rain", ("rain on glass", "puddled reflections", "storm clouds"), ("rainy street", "bus shelter", "coast in a storm"), ("umbrella", "wet photograph", "rain-streaked window"), ("shelter against exposure",)),
     (("море", "sea", "ocean", "wave", "волна", "shore", "берег"), "sea", ("tide", "salt spray", "vast water"), ("open coast", "flooded room", "harbor"), ("paper boat", "lighthouse", "shell"), ("distance against belonging",)),
     (("город", "city", "street", "улиц", "neon", "такси", "taxi"), "city", ("apartment lights", "traffic traces", "shop reflections"), ("lived-in city", "rooftop", "night intersection"), ("phone booth", "neon sign", "taxi"), ("anonymity against connection",)),
@@ -105,6 +114,7 @@ RELATIONSHIP_RULES = (
     (("ты ", "you ", "тебя", "your "), "direct address"),
     (("мама", "mother", "отец", "father", "семь", "family"), "family bond"),
     (("ушел", "ушла", "leave", "left", "goodbye", "прощ"), "separation"),
+    (("верн", "return", "come back"), "anticipated reunion"),
 )
 
 
@@ -134,18 +144,21 @@ class VisualProfileBuilder:
     def build(self, song, seed=None):
         lyrics_semantic = self.lyrics_analyzer.analyze(song.lyrics)
         metadata_semantic = self.lyrics_analyzer.analyze(" ".join((song.artist, song.album, song.genre)))
-        title_semantic = _title_specific_semantics(song.title)
+        title_semantic = _merge_semantic_maps(
+            self.lyrics_analyzer.analyze(song.title),
+            _title_specific_semantics(song.title),
+        )
         audio_semantic = _visual_dna_semantics(song)
         lyrics_used = bool(song.lyrics.strip() and lyrics_semantic["themes"])
         merged = {}
         for key in ("themes", "imagery", "settings", "objects", "conflicts", "relationships"):
             audio_values = tuple(audio_semantic[key])[:6]
-            text_allowance = 8 if key == "relationships" else max(2, 8 - len(audio_values))
+            text_allowance = 8 if key == "relationships" else 6
             text_values = _merge_many(
                 (lyrics_semantic[key], title_semantic[key], metadata_semantic[key]),
                 text_allowance,
             )
-            merged[key] = _merge(audio_values, text_values, 8)
+            merged[key] = _merge(text_values, audio_values, 8) if lyrics_used else _merge(audio_values, text_values, 8)
         dna = song.visual_dna
         energy = _clamp(getattr(dna, "arousal", song.speed * .20 + song.beat_density * .18 + song.rhythmicity * .17 + song.hardness * .28 + song.change_rate * .17))
         drama = _clamp(getattr(dna, "tension", song.hardness * .42 + song.dynamic_range * .31 + song.change_rate * .27))
@@ -159,6 +172,21 @@ class VisualProfileBuilder:
         conflicts = merged["conflicts"] or self._default_conflicts(mood)
         weights = self._weights_from_dna(song, energy, drama, abstraction, lyrics_used)
         plan = song.visual_plan.to_dict() if hasattr(song.visual_plan, "to_dict") else dict(song.visual_plan or {})
+        narrative_mode = self._narrative_mode(song, themes, merged["relationships"], energy, drama)
+        semantic_anchor = lyrics_semantic if lyrics_used else title_semantic if title_semantic["themes"] else metadata_semantic
+        anchor_conflict = (semantic_anchor["conflicts"] or conflicts)[0]
+        anchor_object = (semantic_anchor["objects"] or objects)[0]
+        anchor_setting = (semantic_anchor["settings"] or settings)[0]
+        anchor_imagery = (semantic_anchor["imagery"] or imagery)[0]
+        relationship = (semantic_anchor["relationships"] or merged["relationships"] or ("an unspoken personal stake",))[0]
+        core_thesis = f"{tone}: {anchor_conflict}, shaped by {relationship}"
+        visual_metaphor = f"{anchor_object} physically expressing {anchor_conflict}"
+        scene_suggestion = f"{anchor_setting}, using {anchor_imagery} as narrative evidence"
+        subject_emphasis = f"make {anchor_object} or its human interaction the unmistakable primary subject"
+        mood_arc = self._mood_arc(song, tone)
+        abstraction_level = self._abstraction_level(abstraction, narrative_mode)
+        human_presence = self._human_presence(narrative_mode, merged["relationships"], themes)
+        typography_hint = self._typography_hint(narrative_mode, mood, energy, drama)
         return VisualProfile(
             mood=mood,
             emotional_tone=tone,
@@ -180,6 +208,82 @@ class VisualProfileBuilder:
             song_description=song.song_description,
             visual_brief=song.visual_brief,
             visual_plan=plan,
+            narrative_mode=narrative_mode,
+            core_emotional_thesis=core_thesis,
+            visual_metaphor=visual_metaphor,
+            scene_suggestion=scene_suggestion,
+            subject_emphasis=subject_emphasis,
+            mood_arc=mood_arc,
+            abstraction_level=abstraction_level,
+            human_presence_suggestion=human_presence,
+            typography_mood_hint=typography_hint,
+        )
+
+    @staticmethod
+    def _abstraction_level(value, narrative_mode):
+        if narrative_mode in {"intimate", "cinematic_storytelling"}:
+            return "recognizable human-scale realism with one poetic transformation"
+        if value > .68:
+            return "high abstraction anchored by one recognizable object"
+        if value < .34:
+            return "concrete photographic realism"
+        return "balanced realism with a controlled surreal element"
+
+    @staticmethod
+    def _human_presence(narrative_mode, relationships, themes):
+        if narrative_mode == "intimate" or relationships:
+            return "a specific human gesture or interaction is welcome when it carries the relationship"
+        if narrative_mode in {"aggressive", "rhythmic_mechanical"}:
+            return "human presence is optional; physical action matters more than a posed portrait"
+        if set(themes) & {"identity", "performance", "home"}:
+            return "an environmental portrait may reveal identity through action and surroundings"
+        return "prefer a meaningful object, but allow a person when the scene needs scale or narrative"
+
+    @staticmethod
+    def _typography_hint(narrative_mode, mood, energy, drama):
+        if narrative_mode == "rhythmic_mechanical":
+            return "precise electronic rhythm, measured spacing, compact hierarchy"
+        if narrative_mode in {"aggressive", "epic"} or drama > .72:
+            return "heavy dramatic hierarchy with restrained impact accents"
+        if narrative_mode in {"dreamlike", "luminous"}:
+            return "airy lyrical hierarchy with generous spacing"
+        if narrative_mode == "intimate" or mood in {"romantic", "melancholic"}:
+            return "quiet editorial or serif hierarchy with a human scale"
+        if energy > .68:
+            return "bold modern rhythm with asymmetric placement"
+        return "restrained cinematic hierarchy integrated with negative space"
+
+    @staticmethod
+    def _narrative_mode(song, themes, relationships, energy, drama):
+        theme_set = set(themes)
+        if relationships or theme_set & {"love", "loneliness", "identity", "home", "friendship"}:
+            return "intimate"
+        if theme_set & {"conflict", "fire", "power"} or song.hardness > .72:
+            return "aggressive"
+        if theme_set & {"dream", "space"} and song.relaxation > .48:
+            return "dreamlike"
+        if theme_set & {"mortality", "loneliness"} and drama > .55:
+            return "tragic"
+        if theme_set & {"dance", "machine"} or song.rhythmicity > .76:
+            return "rhythmic_mechanical"
+        if theme_set & {"journey", "performance", "fate"} or song.change_rate > .62:
+            return "cinematic_storytelling"
+        if song.brightness > .66 and energy > .52:
+            return "luminous"
+        if drama > .70:
+            return "epic"
+        return "atmospheric"
+
+    @staticmethod
+    def _mood_arc(song, tone):
+        dna = song.visual_dna
+        if dna is None:
+            motion = "rises toward release" if song.change_rate > .55 else "holds a consistent emotional pressure"
+            return f"{tone}; {motion}"
+        position = "early" if dna.climax_position < .35 else "late" if dna.climax_position > .68 else "central"
+        return (
+            f"{tone}; {dna.section_count} musical sections move from restraint to a {position} climax, "
+            f"with section contrast {dna.section_contrast:.2f}"
         )
 
     @staticmethod
@@ -318,6 +422,14 @@ def _merge_many(groups, limit):
     for group in groups:
         values.extend(group)
     return tuple(dict.fromkeys(values))[:limit]
+
+
+def _merge_semantic_maps(*maps):
+    keys = ("themes", "imagery", "settings", "objects", "conflicts", "relationships")
+    return {
+        key: tuple(dict.fromkeys(item for mapping in maps for item in mapping.get(key, ())))
+        for key in keys
+    }
 
 
 def _visual_dna_semantics(song):

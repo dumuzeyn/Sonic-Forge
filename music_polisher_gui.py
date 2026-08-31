@@ -43,6 +43,10 @@ COVER_CHOICES = {
         "ru": {"Быстрое": "simple", "Высокое": "balanced", "Максимальное": "rich"},
         "en": {"Fast": "simple", "High": "balanced", "Maximum": "rich"},
     },
+    "title_mode": {
+        "ru": {"Оригинальное": "original", "Очищенное": "cleaned", "Стилизованное": "stylized", "Короткое художественное": "short"},
+        "en": {"Original": "original", "Cleaned": "cleaned", "Stylized": "stylized", "Short artistic": "short"},
+    },
 }
 
 AUDIO_PROFILE_CHOICES = {
@@ -224,6 +228,7 @@ class SonicForgeApp(tk.Tk):
         self.cover_engine_var = tk.StringVar(value="AI-обложка")
         self.cover_detail_var = tk.StringVar(value="Быстрое")
         self.cover_mood_var = tk.StringVar(value="Автоматически")
+        self.cover_title_mode_var = tk.StringVar(value="Очищенное")
         self.cover_title_var = tk.BooleanVar(value=True)
         self.cover_artist_var = tk.BooleanVar(value=True)
         self.cover_provider_status_var = tk.StringVar()
@@ -346,6 +351,7 @@ class SonicForgeApp(tk.Tk):
             ("engine", self.cover_engine_var),
             ("mood", self.cover_mood_var),
             ("detail", self.cover_detail_var),
+            ("title_mode", self.cover_title_mode_var),
         ):
             internal = self.cover_choice(kind, variable.get())
             display = next(
@@ -764,6 +770,7 @@ class SonicForgeApp(tk.Tk):
             "cover_size": int(self.cover_size_var.get()),
             "cover_detail": self.cover_choice("detail", self.cover_detail_var.get()),
             "cover_text_mode": self._cover_text_mode(),
+            "cover_title_mode": self.cover_choice("title_mode", self.cover_title_mode_var.get()),
             "cover_mood": self.cover_choice("mood", self.cover_mood_var.get()),
             "embed_cover": bool(self.embed_cover_var.get()),
             "change_cover": not bool(self.no_change_cover_var.get()),
@@ -896,6 +903,7 @@ class SonicForgeApp(tk.Tk):
         lyrics_text = self.view.get_lyrics_text() if self.use_lyrics_for_cover_var.get() else ""
         detail = self.cover_choice("detail", self.cover_detail_var.get())
         text_mode = self._cover_text_mode()
+        title_mode = self.cover_choice("title_mode", self.cover_title_mode_var.get())
         mood = self.cover_choice("mood", self.cover_mood_var.get())
         self.cancel_event.clear()
         self.view.set_busy(True)
@@ -910,6 +918,7 @@ class SonicForgeApp(tk.Tk):
                 lyrics_text,
                 detail,
                 text_mode,
+                title_mode,
                 mood,
                 engine,
                 bool(self.embed_cover_var.get()),
@@ -920,7 +929,7 @@ class SonicForgeApp(tk.Tk):
         self.worker.start()
 
     def _cover_preview_worker(
-        self, source, preview_path, size, seed, lyrics_text, detail, text_mode, mood, engine, embed, quick
+        self, source, preview_path, size, seed, lyrics_text, detail, text_mode, title_mode, mood, engine, embed, quick
     ):
         old_stdout, old_stderr = sys.stdout, sys.stderr
         sys.stdout = QueueWriter(self.log_queue)
@@ -934,6 +943,7 @@ class SonicForgeApp(tk.Tk):
                 lyrics_text=lyrics_text,
                 detail=detail,
                 text_mode=text_mode,
+                title_mode=title_mode,
                 mood_override=mood,
                 engine=engine,
                 cancel_event=self.cancel_event,

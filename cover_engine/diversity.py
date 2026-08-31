@@ -33,8 +33,9 @@ class ArtworkAssessment:
 class DiversityController:
     """Keeps a short memory of a batch and rejects visual repetition."""
 
-    def __init__(self, history_size=8):
+    def __init__(self, history_size=8, strength=1.0):
         self.history = deque(maxlen=max(5, int(history_size)))
+        self.strength = max(0.0, min(2.0, float(strength)))
 
     def concept_score(self, concept):
         score = concept.specificity * 36.0 + 44.0
@@ -48,10 +49,14 @@ class DiversityController:
             score -= 28
         recent = tuple(self.history)[-5:]
         repetition_reasons = []
-        for field, penalty in (("scene", 18), ("main_symbol", 24), ("composition", 14), ("palette_name", 13), ("text_position", 7), ("candidate_type", 6)):
+        for field, penalty in (
+            ("scene", 18), ("main_symbol", 24), ("visual_metaphor", 16),
+            ("composition", 14), ("palette_name", 13), ("candidate_type", 8),
+            ("human_presence", 7), ("text_position", 5),
+        ):
             repeats = sum(1 for item in recent if item.get(field) == getattr(concept, field))
-            score -= repeats * penalty
-            if field in {"scene", "main_symbol", "composition", "palette_name"} and len(recent) >= 3:
+            score -= repeats * penalty * self.strength
+            if field in {"scene", "main_symbol", "visual_metaphor", "composition", "palette_name"} and len(recent) >= 3:
                 if all(item.get(field) == getattr(concept, field) for item in recent[-3:]):
                     repetition_reasons.append(f"серийный повтор: {field}")
         generic = self.generic_reasons(concept) + tuple(repetition_reasons)
@@ -106,6 +111,31 @@ class DiversityController:
         if color_distance < 11 and similarity > .76:
             reasons.append("повторяет цветовой мир недавней обложки")
             score -= 24
+        aesthetic_quality = _clamp01(
+            stat.stddev[0] / 58 * .30
+            + entropy / 8.0 * .26
+            + min(saturation, 110) / 110 * .18
+            + (1.0 - min(1.0, dark_ratio + bright_ratio)) * .26
+        )
+        composition_quality = _clamp01(
+            min(1.0, (high - low) / 150) * .42
+            + min(1.0, edge_mean / 18) * .34
+            + min(1.0, stat.stddev[0] / 52) * .24
+        )
+        title_safe_area = _title_safe_score(gray)
+        diversity = _clamp01((1.0 - similarity) * .78 + min(1.0, color_distance / 80) * .22)
+        artifact_penalty = _clamp01(
+            max(0.0, dark_ratio - .55) * 2.0
+            + max(0.0, bright_ratio - .55) * 1.7
+            + (1.0 if high - low < 24 else 0.0)
+        )
+        genericity_penalty = _clamp01(len(generic) * .55 + (1.0 if edge_mean < 2 and entropy < 4.5 else 0.0))
+        concept_fit = _clamp01(
+            concept.specificity * .58
+            + min(1.0, edge_mean / 16) * .18
+            + (1.0 - min(1.0, dark_ratio + bright_ratio)) * .14
+            + (0.10 if getattr(concept, "main_symbol", "") else 0.0)
+        )
         metrics = {
             "dynamic_range": round(float(high - low), 2),
             "luminance_stddev": round(float(stat.stddev[0]), 2),
@@ -116,6 +146,13 @@ class DiversityController:
             "entropy": round(float(entropy), 3),
             "recent_similarity": round(float(similarity), 4),
             "recent_color_distance": round(float(color_distance), 3),
+            "aesthetic_quality": round(aesthetic_quality, 4),
+            "composition_quality": round(composition_quality, 4),
+            "title_safe_area": round(title_safe_area, 4),
+            "diversity": round(diversity, 4),
+            "artifact_penalty": round(artifact_penalty, 4),
+            "genericity_penalty": round(genericity_penalty, 4),
+            "concept_fit": round(concept_fit, 4),
         }
         accepted = not reasons and score >= 55
         return ArtworkAssessment(round(score, 2), accepted, tuple(reasons), metrics, fingerprint, color_vector)
@@ -128,6 +165,8 @@ class DiversityController:
             "palette_name": concept.palette_name,
             "text_position": concept.text_position,
             "candidate_type": concept.candidate_type,
+            "visual_metaphor": getattr(concept, "visual_metaphor", ""),
+            "human_presence": getattr(concept, "human_presence", "optional"),
             "fingerprint": assessment.fingerprint,
             "color_vector": assessment.color_vector,
         })
@@ -136,6 +175,20 @@ class DiversityController:
     def generic_reasons(concept):
         haystack = f"{concept.scene} {concept.main_symbol}".lower()
         return tuple(f"шаблонный мотив: {marker}" for marker in GENERIC_MARKERS if marker in haystack)
+
+    @staticmethod
+    def needs_alternative_branch(assessments):
+        values = tuple(assessments)
+        if len(values) < 2:
+            return False
+        return any(
+            item.metrics.get("recent_similarity", 0.0) > .86
+            or (
+                item.metrics.get("recent_similarity", 0.0) > .76
+                and item.metrics.get("recent_color_distance", 255.0) < 16
+            )
+            for item in values[1:]
+        )
 
 
 def _difference_hash(gray):
@@ -157,3 +210,25 @@ def _hash_similarity(left, right):
 
 def _color_distance(left, right):
     return sum((a - b) ** 2 for a, b in zip(left, right)) ** .5
+
+
+def _title_safe_score(gray):
+    width, height = gray.size
+    regions = (
+        (0, 0, width, height // 3),
+        (0, height * 2 // 3, width, height),
+        (0, 0, width // 2, height),
+        (width // 2, 0, width, height),
+        (width // 6, height // 3, width * 5 // 6, height * 2 // 3),
+    )
+    scores = []
+    for box in regions:
+        crop = gray.crop(box)
+        variation = ImageStat.Stat(crop).stddev[0]
+        edges = ImageStat.Stat(crop.filter(ImageFilter.FIND_EDGES)).mean[0]
+        scores.append(_clamp01(1.0 - variation / 92 * .58 - edges / 42 * .42))
+    return max(scores, default=0.0)
+
+
+def _clamp01(value):
+    return max(0.0, min(1.0, float(value)))

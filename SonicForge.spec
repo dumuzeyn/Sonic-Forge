@@ -4,18 +4,21 @@ from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 
 whisper_datas = collect_data_files('faster_whisper')
+open_clip_datas = collect_data_files('open_clip')
 ct2_binaries = collect_dynamic_libs('ctranslate2')
+torch_binaries = collect_dynamic_libs('torch')
+torchvision_binaries = collect_dynamic_libs('torchvision')
 
 
 a = Analysis(
     ['music_polisher_gui.py'],
     pathex=[],
-    binaries=[('C:\\ffmpeg\\bin\\ffmpeg.exe', 'ffmpeg')] + ct2_binaries,
+    binaries=[('C:\\ffmpeg\\bin\\ffmpeg.exe', 'ffmpeg')] + ct2_binaries + torch_binaries + torchvision_binaries,
     datas=[
         ('Normalize-Music.py', '.'),
         ('assets\\sonic_forge_mark.ico', 'assets'),
         ('assets\\sonic_forge_mark.png', 'assets'),
-    ] + whisper_datas,
+    ] + whisper_datas + open_clip_datas,
     hiddenimports=[
         'faster_whisper',
         'faster_whisper.audio',
@@ -24,6 +27,10 @@ a = Analysis(
         'ctranslate2',
         'av',
         'ftfy',
+        'open_clip',
+        'torch',
+        'torchvision',
+        'timm',
     ],
     hookspath=[],
     hooksconfig={},
@@ -38,11 +45,7 @@ a = Analysis(
         'pytest',
         'scipy',
         'tensorflow',
-        'timm',
-        'torch',
         'torchaudio',
-        'torchvision',
-        'open_clip',
     ],
     noarchive=False,
     optimize=0,

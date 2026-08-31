@@ -3,9 +3,10 @@ import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageFilter
 
 
 SUBPROCESS_STARTUP_KWARGS = (
@@ -17,8 +18,31 @@ class LocalGenerationError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class ModelCapabilities:
+    backend: str
+    native_sizes: tuple[int, ...]
+    max_native_size: int
+    supports_upscale_enhancement: bool
+    supports_cpu_fallback: bool
+
+    def to_dict(self):
+        return asdict(self)
+
+
 class StableDiffusionCppBackend:
     name = "stable-diffusion.cpp"
+
+    QUALITY_PROFILES = {
+        "economy": {"native_size": 384, "steps": 10, "cfg": 5.8, "sharpen": 0.00},
+        "simple": {"native_size": 384, "steps": 14, "cfg": 6.2, "sharpen": 0.00},
+        "balanced": {"native_size": 512, "steps": 20, "cfg": 6.7, "sharpen": 0.10},
+        "quality": {"native_size": 512, "steps": 24, "cfg": 6.9, "sharpen": 0.14},
+        "rich": {"native_size": 512, "steps": 28, "cfg": 7.0, "sharpen": 0.18},
+    }
+
+    def __init__(self):
+        self.last_generation_info = {}
 
     def generate(self, request, runtime_path, model_path):
         try:
@@ -30,6 +54,7 @@ class StableDiffusionCppBackend:
             return self._run(request, runtime_path, model_path, economy=True)
 
     def _run(self, request, runtime_path, model_path, economy):
+        capabilities = self.capabilities(model_path)
         with tempfile.TemporaryDirectory(prefix="sonicforge_local_ai_") as directory:
             output = Path(directory) / "generated.png"
             command = self._command(
@@ -68,7 +93,24 @@ class StableDiffusionCppBackend:
                 raise LocalGenerationError(detail or f"Локальный движок завершился с кодом {process.returncode}")
             with Image.open(output) as generated:
                 image = generated.convert("RGB").copy()
-        return image.resize((request.size, request.size), Image.Resampling.LANCZOS)
+        native_size = image.width
+        upscale = request.size != native_size
+        if upscale:
+            image = image.resize((request.size, request.size), Image.Resampling.LANCZOS)
+            amount = self.QUALITY_PROFILES.get(request.detail, self.QUALITY_PROFILES["balanced"])["sharpen"]
+            if amount:
+                enhanced = image.filter(ImageFilter.UnsharpMask(radius=1.2, percent=55, threshold=5))
+                image = Image.blend(image, enhanced, amount)
+        self.last_generation_info = {
+            "quality": "economy" if economy else request.detail,
+            "native_size": native_size,
+            "output_size": request.size,
+            "upscaled": upscale,
+            "capabilities": capabilities.to_dict(),
+        }
+        if upscale:
+            print(f"Нативная генерация: {native_size}×{native_size}; улучшение до {request.size}×{request.size}")
+        return image
 
     @staticmethod
     def _stop_process(process):
@@ -82,9 +124,12 @@ class StableDiffusionCppBackend:
     @staticmethod
     def _command(request, runtime_path, model_path, output, economy, backend=None):
         lcm = "lcm" in Path(model_path).name.lower()
-        quality_steps = {"simple": 14, "balanced": 18, "rich": 22}
-        steps = 10 if economy else quality_steps.get(request.detail, 18)
-        side = 384 if economy else 512
+        profile = StableDiffusionCppBackend.QUALITY_PROFILES.get(
+            "economy" if economy else request.detail,
+            StableDiffusionCppBackend.QUALITY_PROFILES["balanced"],
+        )
+        steps = profile["steps"]
+        side = profile["native_size"]
         command = [
             str(runtime_path),
             "-m",
@@ -92,13 +137,8 @@ class StableDiffusionCppBackend:
             "-p",
             getattr(request.concept, "render_prompt", "") or request.concept.prompt,
             "-n",
-            (
-                "text, letters, words, logo, watermark, border, low quality, blurry, "
-                "duplicate object, generic album cover, corridor, hallway, tunnel, passage, "
-                "stairwell, lone centered silhouette, person, human, portrait, teal fog, "
-                "monochrome cyan color cast, glowing doorway, light portal, empty room, "
-                "abstract orb, perfect sphere, procedural gradient, waveform, equalizer, "
-                "music note, meaningless floating geometry"
+            getattr(request.concept, "negative_prompt", "") or (
+                "text, letters, words, logo, watermark, low quality, blurry focal subject"
             ),
             "-o",
             str(output),
@@ -109,7 +149,7 @@ class StableDiffusionCppBackend:
             "--steps",
             str(steps),
             "--cfg-scale",
-            "2.2" if lcm else "6.5",
+            "2.2" if lcm else str(profile["cfg"]),
             "--sampling-method",
             "lcm" if lcm else "dpm++2m",
             "-s",
@@ -133,6 +173,17 @@ class StableDiffusionCppBackend:
         else:
             command.extend(("--auto-fit", "--max-vram", "-1"))
         return command
+
+    @staticmethod
+    def capabilities(model_path):
+        # The current SD 1.x compatible path is honest about its native limit.
+        return ModelCapabilities(
+            backend="stable-diffusion.cpp",
+            native_sizes=(384, 512),
+            max_native_size=512,
+            supports_upscale_enhancement=True,
+            supports_cpu_fallback=True,
+        )
 
     @staticmethod
     def _preferred_backend(runtime_path):

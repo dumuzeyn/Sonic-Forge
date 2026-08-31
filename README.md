@@ -44,7 +44,13 @@
 
 Локальный генеративный движок создаёт полноценные художественные сцены: окружение, свет, глубину, центральную метафору и отдельную композицию для каждой песни. Для него используется `stable-diffusion.cpp` и выбранная пользователем совместимая модель `.safetensors`, `.ckpt` или `.gguf`.
 
-При прямом создании приложение генерирует один готовый вариант, а кнопка **Новый вариант** создаёт следующую независимую трактовку. В полном конвейере могут сравниваться несколько художественных концепций. Проверка качества отбрасывает пустые, слишком тёмные, шаблонные и чрезмерно похожие результаты. Текст добавляется только после создания изображения и может быть отключён.
+При прямом создании приложение генерирует один готовый вариант, а кнопка **Новый вариант** создаёт следующую независимую трактовку. В полном конвейере сравниваются разные художественные концепции: кинематографическая сцена, портрет в окружении, предметная метафора, редакционная, сюрреалистическая, абстрактная или минималистичная композиция. У каждого семейства свой короткий prompt-шаблон и контекстный negative prompt. Портретный вариант разрешает человека и запрещает только дефекты лица, рук и случайные дубликаты.
+
+Смысловая CLIP-модель загружается в память в основном пути AI-генерации и сопоставляет каждый результат с предметом, сценой и метафорой. Если файл CLIP отсутствует в старой установке, приложение пытается установить его автоматически. Общий отбор учитывает смысл, эстетику, композицию, свободную область для названия, разнообразие, соответствие концепции и визуальные дефекты; вклад каждого компонента виден в журнале.
+
+Текст добавляется только после генерации изображения и может быть отключён. Для названия доступны исходный, очищенный, стилизованный и короткий режимы. Обработчик названия удаляет мусор файла, оценивает уверенность, выбирает смысловые слова, строит иерархию строк и при сомнении возвращается к очищенному оригиналу. Короткий вариант использует только слова исходного названия.
+
+Типографика получает изображение, характер песни, художественную концепцию и результат обработки названия одновременно. Она выбирает семейство шрифта, вес, реальное межбуквенное расстояние, разбиение строк, смысловой акцент, иерархию исполнителя, безопасную область и один из вариантов раскладки. Цвет, контраст, подложка, обводка и свечение рассчитываются по пикселям конкретной зоны, поэтому текст не является одинаковой надписью поверх всех обложек.
 
 Модель хранится отдельно от EXE:
 
@@ -52,7 +58,9 @@
 %LOCALAPPDATA%\SonicForge\models\image
 ```
 
-После установки модели генерация работает без интернета. Если AI-модель недоступна, выбранный AI-режим может завершить работу через Music2Picture v2 и сообщает об этом в журнале. Это аварийное поведение не объединяет два пользовательских режима: Music2Picture v2 можно выбрать напрямую.
+При рекомендуемой установке загружаются основная модель изображения, локальный движок и модель смысловой проверки. После установки генерация работает без интернета. Экономный, быстрый, сбалансированный, качественный и максимальный профили имеют отдельные размеры, число шагов и guidance. Текущая SD 1.x модель честно работает в собственном разрешении до 512×512; больший итоговый размер получается отдельным увеличением и отмечается в журнале вместе с возможностями backend.
+
+Если AI-модель недоступна, выбранный AI-режим может завершить работу через Music2Picture v2 и сообщает об этом в журнале. Это аварийное поведение не объединяет два пользовательских режима: Music2Picture v2 можно выбрать напрямую.
 
 ### Music2Picture v2
 
@@ -139,7 +147,7 @@ python .\music2picture.py covers --source "C:\Music\Input" --output "C:\Music\Co
 
 Готовая Windows-версия: [скачать SonicForge.exe](https://github.com/dumuzeyn/Sonic-Forge/raw/refs/heads/main/dist/SonicForge.exe).
 
-AI-модель не входит в EXE из-за размера и загружается отдельно из окна управления моделью. Для сборки из исходников:
+AI-модель и модель смысловой проверки не входят в EXE из-за размера и загружаются отдельно из окна управления моделью. Среда смысловой проверки включена в приложение, поэтому после рекомендуемой установки никаких дополнительных программ не требуется. Для сборки из исходников:
 
 ```powershell
 pip install -r requirements.txt
@@ -183,7 +191,9 @@ Audio -> Audio Analysis -> VisualDNA -> Song Description
 -> Visual Brief + VisualPlan -> selected cover engine
 ```
 
-AI Cover Generation uses a local `stable-diffusion.cpp` model to create cinematic, surreal, or editorial scenes and then applies quality control and optional typography.
+AI Cover Generation uses a local `stable-diffusion.cpp` model with distinct compact templates for cinematic, portrait, symbolic, editorial, surreal, abstract, and minimal scenes. A local CLIP model is loaded in the main runtime path and compares every candidate with the song concept. Final ranking combines semantic relevance, aesthetics, composition, title-safe space, diversity, concept fit, and artifact penalties.
+
+Original, cleaned, stylized, and short title modes are available. Stylized mode builds semantic emphasis and line hierarchy rather than merely changing case, while low-confidence transformations fall back to the cleaned canonical title. Typography receives the actual artwork pixels, song profile, concept, and title treatment to select contextual font roles, tracking, layout, contrast protection, and accents.
 
 Music2Picture v2 uses the built-in **Artistic Texture v3** renderer. It creates layered fluid, marbled, and turbulent artwork locally from macro color masses, meso-scale flows, and micro detail; it never draws a waveform or spectrum. Audio features control texture scale, flow, turbulence, contrast, detail, and a deterministic 3–7 color palette. Five spatial composition families prevent every track from becoming a recolored copy of one template.
 
@@ -199,6 +209,6 @@ Selecting a folder can generate a separate `song_description` and `visual_brief`
 
 [Download SonicForge.exe](https://github.com/dumuzeyn/Sonic-Forge/raw/refs/heads/main/dist/SonicForge.exe)
 
-FFmpeg is bundled. The multi-gigabyte image model remains a separate optional download managed inside the application.
+FFmpeg is bundled. The multi-gigabyte image and semantic models remain separate downloads managed inside the application. Their runtime dependencies are included, so the recommended installation needs no additional software.
 
 > Project author: Zeynalov U.R.o.

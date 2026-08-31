@@ -109,11 +109,15 @@ class ImageModelManagerDialog(tk.Toplevel):
 
     def refresh(self):
         status = self.manager.status()
-        self.status_var.set(
-            self.app.t("model_status_ready").format(path=status.model_path)
-            if status.ready
-            else self.app.t("model_status_missing")
-        )
+        if status.ready:
+            semantic_key = "model_semantic_ready" if status.semantic_path else "model_semantic_missing"
+            self.status_var.set(
+                self.app.t("model_status_ready").format(path=status.model_path)
+                + "\n"
+                + self.app.t(semantic_key)
+            )
+        else:
+            self.status_var.set(self.app.t("model_status_missing"))
         self.remove_button.configure(
             state=tk.NORMAL if self.manager.recommended_path.is_file() else tk.DISABLED
         )

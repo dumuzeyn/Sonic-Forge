@@ -1,3 +1,4 @@
+import importlib.util
 from dataclasses import dataclass, replace
 
 from .model_manager import ImageModelManager
@@ -49,7 +50,48 @@ class SemanticQualityEvaluator:
 
     @property
     def available(self):
-        return self.manager.semantic_model_path() is not None
+        return self.manager.semantic_model_path() is not None and self.runtime_available
+
+    @property
+    def runtime_available(self):
+        return bool(importlib.util.find_spec("open_clip") and importlib.util.find_spec("torch"))
+
+    def status(self):
+        if self.manager.semantic_model_path() is None:
+            return False, "semantic model file is not installed"
+        if not self.runtime_available:
+            return False, "open_clip/torch runtime is unavailable"
+        return True, "local CLIP semantic evaluator loaded"
+
+    def ensure_available(self, auto_download=True):
+        available, reason = self.status()
+        if available or not auto_download or not self.runtime_available:
+            return available, reason
+        last_percent = -10
+
+        def progress(_stage, current, total):
+            nonlocal last_percent
+            percent = int(current * 100 / total) if total else 0
+            if percent >= last_percent + 10:
+                last_percent = percent
+                print(f"Semantic model download: {percent}%")
+
+        try:
+            print("Semantic model is missing; automatic installation started")
+            self.manager.download_semantic(progress=progress)
+        except Exception as exc:
+            return False, f"automatic semantic model installation failed: {exc}"
+        return self.status()
+
+    def prepare(self, auto_download=True):
+        available, reason = self.ensure_available(auto_download=auto_download)
+        if not available:
+            return False, reason
+        try:
+            self._load()
+        except Exception as exc:
+            return False, f"CLIP model could not be loaded into memory: {exc}"
+        return True, "local CLIP semantic model loaded into memory"
 
     def apply(self, assessment, image, concept):
         semantic = self.assess(image, concept)
@@ -63,19 +105,24 @@ class SemanticQualityEvaluator:
             "semantic_forbidden_human": round(semantic.forbidden_human_score, 4),
             "semantic_forbidden_text": round(semantic.forbidden_text_score, 4),
             "semantic_adjustment": round(semantic.score_adjustment, 2),
+            "semantic_relevance": round(max(0.0, min(1.0, (semantic.combined - .12) / .16)), 4),
         })
+        metrics["genericity_penalty"] = max(
+            float(metrics.get("genericity_penalty", 0.0)),
+            max(0.0, min(1.0, (semantic.generic_score - semantic.combined + .08) / .12)),
+        )
         reasons = tuple(dict.fromkeys((*assessment.reasons, *semantic.reasons)))
-        score = round(assessment.score + semantic.score_adjustment, 2)
         return replace(
             assessment,
-            score=score,
-            accepted=not reasons and score >= 55,
             reasons=reasons,
             metrics=metrics,
         )
 
     def assess(self, image, concept):
         self._load()
+        allow_human = getattr(concept, "candidate_type", "") == "portrait" or getattr(
+            concept, "composition", ""
+        ) == "environmental_portrait"
         labels = (
             f"{concept.main_symbol} in {concept.scene}",
             concept.main_symbol,
@@ -111,7 +158,7 @@ class SemanticQualityEvaluator:
             reasons.append("сцена выглядит пустой: выбранная метафора не подтверждена")
         if generic_margin < .008:
             reasons.append("изображение ближе к шаблонной обложке, чем к выбранной концепции")
-        if forbidden_human_score > .23 and forbidden_human_score > object_score - .02:
+        if not allow_human and forbidden_human_score > .23 and forbidden_human_score > object_score - .02:
             reasons.append("модель добавила человека или силуэт вместо предметной метафоры")
         if forbidden_text_score > .22 and forbidden_text_score > object_score - .035:
             reasons.append("внутри изображения появились случайные буквы или псевдотекст")
@@ -119,7 +166,7 @@ class SemanticQualityEvaluator:
             (object_score - .19) * 145
             + object_margin * 150
             + generic_margin * 100
-            - max(0.0, forbidden_human_score - .18) * 120
+            - (0.0 if allow_human else max(0.0, forbidden_human_score - .18) * 120)
             - max(0.0, forbidden_text_score - .18) * 110
         )
         return SemanticAssessment(

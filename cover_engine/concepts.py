@@ -1,6 +1,8 @@
 import hashlib
 from dataclasses import asdict, dataclass
 
+from .config import CoverGenerationConfig
+
 
 COMPOSITIONS = (
     "cinematic_scene",
@@ -79,11 +81,24 @@ MOOD_PALETTE_PREFERENCES = {
 }
 
 CANDIDATE_BLUEPRINTS = (
-    ("cinematic", ("cinematic_scene", "wide_landscape", "asymmetrical_scene"), "cinematic title", "natural motivated light"),
-    ("symbolic", ("object_centered", "symbolic_minimal", "theatrical_still_life"), "compact title", "precise studio-meets-environment light"),
-    ("editorial", ("editorial_poster", "fragmented_collage", "central_emblem"), "editorial title", "graphic directional light"),
-    ("surreal", ("surreal_artwork", "double_exposure", "abstract_expressive"), "expressive title", "dreamlike but physically coherent light"),
+    ("cinematic", ("cinematic_scene", "wide_landscape", "asymmetrical_scene"), "cinematic", "natural motivated light"),
+    ("symbolic", ("object_centered", "symbolic_minimal", "theatrical_still_life"), "bold modern", "precise studio-meets-environment light"),
+    ("editorial", ("editorial_poster", "fragmented_collage", "central_emblem"), "indie editorial", "graphic directional light"),
+    ("surreal", ("surreal_artwork", "double_exposure", "abstract_expressive"), "dreamy", "dreamlike but physically coherent light"),
+    ("portrait", ("environmental_portrait", "asymmetrical_scene", "cinematic_scene"), "elegant serif", "soft motivated portrait light"),
+    ("abstract", ("abstract_expressive", "central_emblem", "double_exposure"), "electronic neon", "material light with controlled color bloom"),
+    ("minimal", ("symbolic_minimal", "strong_negative_space", "object_centered"), "minimal clean", "restrained directional light"),
 )
+
+PROMPT_TEMPLATES = {
+    "symbolic": "SYMBOLIC THESIS: {idea}. One tactile subject: {subject}. Stage it in {scene} as {metaphor}. {atmosphere}. Palette: {palette}. Medium: conceptual still life, {detail}. Composition: {composition}. Keep {text_area} calm for typography.",
+    "cinematic": "CINEMATIC MOMENT: {idea}. Capture {subject} during one decisive action in {scene}. The environment expresses {metaphor}. {atmosphere}. Palette: {palette}. Medium: cinematic production still, {detail}. Framing: {composition}; preserve {text_area} negative space.",
+    "portrait": "ENVIRONMENTAL PORTRAIT: {idea}. Show {subject} through a specific gesture in {scene}; surroundings reveal {metaphor}. {atmosphere}. Palette: {palette}. Medium: editorial music photography, {detail}. Framing: {composition}; leave {text_area} readable.",
+    "abstract": "MATERIAL ABSTRACTION: {idea}. Keep {subject} recognizable while transforming it through {metaphor} in {scene}. {atmosphere}. Palette: {palette}. Medium: tactile pigment, glass and light, {detail}. Structure: {composition}; reserve {text_area} calm space.",
+    "surreal": "SURREAL REALITY: {idea}. In believable {scene}, make {subject} physically embody {metaphor}. {atmosphere}. Palette: {palette}. Medium: coherent surreal photography, {detail}. Framing: {composition}; protect {text_area} for type.",
+    "editorial": "EDITORIAL STATEMENT: {idea}. Build a bold hierarchy around {subject} in {scene}, using {metaphor} as the graphic argument. {atmosphere}. Palette: {palette}. Medium: authored poster-photography, {detail}. Layout: {composition}; keep {text_area} intentional.",
+    "minimal": "MINIMAL CONCEPT: {idea}. Use only {subject} and one environmental clue from {scene} to express {metaphor}. {atmosphere}. Palette: {palette}. Medium: restrained conceptual photography, {detail}. Layout: {composition}; leave generous {text_area} space.",
+}
 
 
 @dataclass(frozen=True)
@@ -105,12 +120,19 @@ class CoverConcept:
     avoid: tuple[str, ...] = ()
     specificity: float = 0.5
     render_prompt: str = ""
+    negative_prompt: str = ""
+    visual_metaphor: str = ""
+    human_presence: str = "optional"
+    typography_locked: bool = False
 
     def to_dict(self):
         return asdict(self)
 
 
 class CoverConceptBuilder:
+    def __init__(self, config=None):
+        self.config = config or CoverGenerationConfig()
+
     def build(self, song, profile, seed=None, detail="balanced"):
         return self.build_candidates(song, profile, seed=seed, detail=detail)[0]
 
@@ -122,8 +144,9 @@ class CoverConceptBuilder:
         used_compositions = set()
         used_scenes = set()
         used_symbols = set()
+        blueprints = self._blueprints(profile)
         for index in range(count):
-            family, choices, typography, lighting = CANDIDATE_BLUEPRINTS[index % len(CANDIDATE_BLUEPRINTS)]
+            family, choices, typography, lighting = blueprints[index % len(blueprints)]
             composition = self._unused(choices, base + index * 7, used_compositions)
             scene = self._scene(profile, family, base + index * 11, used_scenes)
             symbol = self._symbol(song, profile, family, base + index * 13, used_symbols)
@@ -139,8 +162,16 @@ class CoverConceptBuilder:
                 song, profile, scene, symbol, composition, palette, atmosphere,
                 lighting, typography, conflict, avoid, detail, family,
             )
+            if not self.config.prompt_compaction and profile.visual_brief:
+                prompt += f" SOURCE VISUAL BRIEF: {profile.visual_brief[:500]}"
             render_prompt = self._render_prompt(
                 profile, scene, symbol, composition, palette, lighting, family, detail,
+            )
+            human_presence = self._human_presence(profile, family)
+            negative_prompt = (
+                self._negative_prompt(profile, scene, family, composition, human_presence)
+                if self.config.dynamic_negative_prompt
+                else "text, letters, logo, watermark, low quality, blurry focal subject, duplicate main subject"
             )
             concepts.append(CoverConcept(
                 scene=scene,
@@ -160,8 +191,25 @@ class CoverConceptBuilder:
                 avoid=avoid,
                 specificity=specificity,
                 render_prompt=render_prompt,
+                negative_prompt=negative_prompt,
+                visual_metaphor=profile.visual_metaphor,
+                human_presence=human_presence,
             ))
         return tuple(concepts)
+
+    def _blueprints(self, profile):
+        lookup = {item[0]: item for item in CANDIDATE_BLUEPRINTS}
+        order = {
+            "intimate": ("portrait", "cinematic", "symbolic", "editorial", "surreal"),
+            "dreamlike": ("surreal", "abstract", "cinematic", "minimal", "editorial"),
+            "rhythmic_mechanical": ("editorial", "abstract", "cinematic", "symbolic", "minimal"),
+            "aggressive": ("cinematic", "editorial", "symbolic", "surreal", "abstract"),
+            "tragic": ("cinematic", "portrait", "symbolic", "surreal", "minimal"),
+            "luminous": ("cinematic", "editorial", "portrait", "minimal", "surreal"),
+        }.get(profile.narrative_mode, ("cinematic", "symbolic", "editorial", "surreal", "minimal"))
+        if not self.config.allow_human_subjects_auto:
+            order = tuple(name for name in order if name != "portrait")
+        return tuple(lookup[name] for name in order)
 
     @staticmethod
     def _unused(choices, value, used):
@@ -177,7 +225,7 @@ class CoverConceptBuilder:
     @classmethod
     def _scene(cls, profile, family, value, used):
         settings = list(profile.settings)
-        if family in {"cinematic", "surreal"}:
+        if family in {"cinematic", "surreal", "abstract"}:
             outdoor = [item for item in settings if not any(
                 word in item.lower()
                 for word in ("room", "interior", "apartment", "hall", "archive", "kitchen", "bedroom")
@@ -190,6 +238,10 @@ class CoverConceptBuilder:
             settings.extend((f"{profile.settings[0]} altered by {profile.imagery[0]}", f"a real landscape where {profile.conflicts[0]} becomes visible"))
         elif family == "symbolic":
             settings.extend((f"a carefully staged corner of {profile.settings[0]}", "a physical still-life environment with visible depth"))
+        elif family == "portrait":
+            settings.extend((f"a lived-in part of {profile.settings[0]}", f"{profile.settings[0]} during a specific human action"))
+        elif family == "minimal":
+            settings.extend((f"a restrained section of {profile.settings[0]}",))
         return cls._unused(tuple(settings), value, used)
 
     @classmethod
@@ -204,6 +256,10 @@ class CoverConceptBuilder:
             symbols = (f"{subject} as one oversized tactile symbol with clearly readable materials", subject)
         elif family == "editorial":
             symbols = (f"{subject} arranged as a monumental physical emblem", subject)
+        elif family == "portrait":
+            symbols = (f"a specific person interacting with {subject}, face and gesture carrying the emotional conflict", subject)
+        elif family == "abstract":
+            symbols = (f"{subject} dissolving into tactile pigment, glass, smoke, and light while remaining recognizable", subject)
         else:
             symbols = (f"{subject} transformed by {profile.imagery[family_index % len(profile.imagery)]}", subject)
         symbols = (*symbols, cls._audio_symbol(song))
@@ -267,37 +323,68 @@ class CoverConceptBuilder:
 
     @staticmethod
     def _prompt(song, profile, scene, symbol, composition, palette, atmosphere, lighting, typography, conflict, avoid, detail, family):
-        style_mix = ", ".join(f"{name} {round(weight * 100)}%" for name, weight in profile.style_weights.items())
-        detail_text = {"simple": "one unmistakable focal point and restrained supporting detail", "rich": "high material detail on the main object, layered depth, authored production design, and precise lighting"}.get(detail, "clear environmental detail and controlled texture")
-        relationship = ", ".join(profile.relationships) if profile.relationships else "an implied human story without a generic anonymous figure"
-        return (
-            "Create a premium square album cover as a complete authored artwork, suitable for a real music release. "
-            f"Interpret the song titled '{song.title}' by '{song.artist or 'an independent artist'}'; do not render these words in the image. "
-            f"AUDIO-LED SONG DESCRIPTION: {profile.song_description} "
-            f"VISUAL BRIEF: {profile.visual_brief} "
-            f"CONCEPT TYPE: {family}. SCENE: {scene}. CENTRAL VISUAL METAPHOR: {symbol}. "
-            f"EMOTIONAL CONFLICT: {conflict}. RELATIONSHIP: {relationship}. "
-            f"ENVIRONMENTAL IMAGERY: {', '.join(profile.imagery[:5])}. AUDIO CHARACTER: {', '.join(profile.audio_character)}. "
-            f"COMPOSITION: {COMPOSITION_DIRECTIONS[composition]}. ATMOSPHERE: {atmosphere}. LIGHTING: {lighting}. "
-            f"COLOR WORLD: {', '.join(palette)}; use all colors with natural local variation, not a monochrome wash. "
-            f"VISUAL STYLE: {style_mix}; {detail_text}. The central object must occupy roughly 35-55 percent of the cover and be readable at phone-thumbnail size. "
-            f"Reserve a calm region suitable for a {typography} without placing text there. "
-            "Use real spatial depth, recognizable materials, a clear focal object, and a song-specific narrative clue. Background architecture or landscape must not become the main subject. "
-            f"STRICTLY AVOID: {', '.join(avoid)}, generic moody album art, default cyan grading, repeated portal imagery, procedural gradients, waveform, equalizer, music note, circles as decoration, logos, borders, text, letters, words, watermark, duplicated subjects, and meaningless floating geometry. "
-            "A scene that could fit any unrelated song is a failed result."
+        detail_text = {"simple": "restrained detail", "rich": "precise tactile detail and layered depth"}.get(detail, "controlled material detail")
+        template = PROMPT_TEMPLATES.get(family, PROMPT_TEMPLATES["cinematic"])
+        prompt = template.format(
+            idea=profile.core_emotional_thesis,
+            subject=symbol,
+            scene=scene,
+            metaphor=profile.visual_metaphor,
+            atmosphere=f"{atmosphere}; {profile.mood_arc}",
+            palette=", ".join(palette),
+            detail=detail_text,
+            composition=COMPOSITION_DIRECTIONS[composition],
+            text_area=typography,
         )
+        return prompt + " Premium square album artwork, one dominant thesis, readable at phone size, no rendered lettering."
 
     @staticmethod
     def _render_prompt(profile, scene, symbol, composition, palette, lighting, family, detail):
-        material_detail = "highly detailed tactile materials" if detail == "rich" else "clear tactile materials"
-        interior_rule = "one open room in wide side view, not a hallway" if any(
-            word in scene.lower() for word in ("room", "interior", "apartment", "hall", "archive", "kitchen", "bedroom")
-        ) else "wide view of the location"
+        material_detail = "precise tactile detail" if detail == "rich" else "clear tactile materials"
+        family_direction = {
+            "symbolic": "one tactile symbol with physically readable materials",
+            "cinematic": "one decisive cinematic action with foreground, middle distance and background",
+            "portrait": "specific human gesture, readable face, surroundings carrying the story",
+            "abstract": "material abstraction anchored by one recognizable object",
+            "surreal": "one impossible transformation inside a believable physical world",
+            "editorial": "bold asymmetric editorial hierarchy around one photographed subject",
+            "minimal": "one subject and one supporting clue, generous meaningful negative space",
+        }.get(family, "one dominant album-cover subject")
         return (
-            f"dominant album cover subject: {symbol}, large close foreground object, occupies 45 percent of the frame, "
-            f"audio-led concept: {profile.song_description}, "
-            f"clearly readable materials, {scene} only as background context, visual metaphor for {profile.conflicts[0]}, "
-            f"{interior_rule}, {LOCAL_COMPOSITION_DIRECTIONS[composition]}, {', '.join(palette)}, "
-            f"{lighting}, {profile.mood} {family} album artwork, {material_detail}, "
-            "real spatial depth, background must stay secondary, no people, no human figure, no text"
+            f"premium {family} album cover; {profile.core_emotional_thesis}; subject: {symbol}; "
+            f"scene: {scene}; {family_direction}; {LOCAL_COMPOSITION_DIRECTIONS[composition]}; "
+            f"palette: {', '.join(palette)}; {lighting}; {material_detail}; no rendered text"
         )
+
+    @staticmethod
+    def _negative_prompt(profile, scene, family, composition, human_presence="optional"):
+        negatives = [
+            "text", "letters", "words", "logo", "watermark", "border", "low quality",
+            "blurry focal subject", "duplicate main subject", "waveform", "equalizer",
+            "music note", "generic stock album cover", "meaningless floating geometry",
+        ]
+        if family == "portrait":
+            negatives.extend(("anonymous silhouette", "deformed face", "extra fingers", "duplicate person", "blank expression"))
+        elif family == "minimal":
+            negatives.extend(("visual clutter", "crowd", "busy background", "multiple competing objects"))
+        elif family == "abstract":
+            negatives.extend(("plain gradient", "perfect sphere", "empty procedural noise"))
+        else:
+            negatives.extend(("featureless centered silhouette", "empty scene without the main subject"))
+        if not any(word in scene.lower() for word in ("room", "interior", "hall", "kitchen", "bedroom")):
+            negatives.extend(("generic corridor", "glowing doorway", "empty tunnel"))
+        if composition == "strong_negative_space" and "empty scene without the main subject" in negatives:
+            negatives.remove("empty scene without the main subject")
+        if human_presence == "avoid":
+            negatives.extend(("posed portrait", "crowd distracting from the main object"))
+        return ", ".join(dict.fromkeys(negatives))
+
+    def _human_presence(self, profile, family):
+        if family == "portrait":
+            return "required"
+        if not self.config.allow_human_subjects_auto:
+            return "avoid"
+        suggestion = profile.human_presence_suggestion.lower()
+        if any(word in suggestion for word in ("welcome", "portrait", "gesture", "allow")):
+            return "allowed"
+        return "optional"

@@ -383,6 +383,7 @@ class SonicForgeView(ttk.Frame):
 
         fields = (
             ("cover_detail", self.app.cover_detail_var, self.app.cover_choice_values("detail"), "tip_cover_detail"),
+            ("cover_title_mode", self.app.cover_title_mode_var, self.app.cover_choice_values("title_mode"), "tip_cover_title_mode"),
             ("seed", self.app.seed_var, None, "tip_seed"),
             ("cover_size", self.app.cover_size_var, "size", "tip_cover_size"),
         )
@@ -399,11 +400,13 @@ class SonicForgeView(ttk.Frame):
             self.cover_controls.extend((label, control))
             if key == "cover_detail":
                 self.cover_detail_combo = control
+            elif key == "cover_title_mode":
+                self.cover_title_mode_combo = control
             self._tip(label, tip_key)
             self._tip(control, tip_key)
 
         options = ttk.Frame(controls, style="Surface.TFrame")
-        options.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(SPACING["sm"], 0))
+        options.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(SPACING["sm"], 0))
         self.use_lyrics_check = self._localize(
             SquareCheckbutton(options, self.app.use_lyrics_for_cover_var, fixed_width=175),
             "use_lyrics_for_cover_short",
@@ -429,7 +432,7 @@ class SonicForgeView(ttk.Frame):
         self._tip(self.use_lyrics_check, "tip_use_lyrics_for_cover")
 
         model_row = ttk.Frame(controls, style="Surface.TFrame")
-        model_row.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(SPACING["md"], 0))
+        model_row.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(SPACING["md"], 0))
         model_row.columnconfigure(0, weight=1)
         provider = ttk.Label(
             model_row,
@@ -754,6 +757,7 @@ class SonicForgeView(ttk.Frame):
         self._rebuild_metadata_menu()
         self.update_dependencies()
         self.cover_detail_combo.configure(values=self.app.cover_choice_values("detail"))
+        self.cover_title_mode_combo.configure(values=self.app.cover_choice_values("title_mode"))
         self.cover_engine_combo.configure(values=self.app.cover_choice_values("engine"))
         self.audio_profile_combo.configure(values=self.app.audio_profile_values())
         self.log_menu.entryconfigure(0, label=self.app.t("copy"))

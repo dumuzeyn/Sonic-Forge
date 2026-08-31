@@ -45,6 +45,7 @@ def make_cover(
     lyrics_text="",
     detail="balanced",
     text_mode="none",
+    title_mode="cleaned",
     mood_override="auto",
     engine=ENGINE_AI,
     provider=None,
@@ -112,15 +113,18 @@ def make_cover(
         )
         if text_mode != "none":
             from cover_engine.typography import TypographyEngine
+            from cover_engine.titles import clean_artist, resolve_title
 
+            title_resolution = resolve_title(title, title_mode)
             image = TypographyEngine().compose(
                 image,
-                title,
-                artist,
+                title_resolution.selected,
+                clean_artist(artist),
                 profile=SimpleNamespace(
                     typography_style="artistic title",
                     text_position="center",
                 ),
+                title_treatment=title_resolution,
                 enabled=True,
                 show_artist=text_mode == "title_artist",
                 language=bundle.language,
@@ -131,7 +135,7 @@ def make_cover(
         return output_path
 
     print("Движок обложки: локальная AI-генерация")
-    from cover_engine import AutoImageProvider, CoverComposer, SongContext
+    from cover_engine import AutoImageProvider, CoverComposer, SemanticQualityEvaluator, SongContext
 
     dna = bundle.visual_dna
     song = SongContext(
@@ -161,7 +165,10 @@ def make_cover(
     owns_provider = provider is None and composer is None
     if composer is None:
         provider = provider or AutoImageProvider()
-        composer = CoverComposer(provider=provider)
+        composer = CoverComposer(
+            provider=provider,
+            semantic=SemanticQualityEvaluator(),
+        )
     try:
         result, _profile, _concept, artwork = composer.create(
             song,
@@ -169,6 +176,7 @@ def make_cover(
             size=size,
             seed=seed,
             text_mode=text_mode,
+            title_mode=title_mode,
             detail=detail,
             audio_path=path,
             cancel_event=cancel_event,
@@ -192,6 +200,7 @@ def make_covers(
     lyrics_lookup=None,
     detail="balanced",
     text_mode="none",
+    title_mode="cleaned",
     mood_override="auto",
     engine=ENGINE_AI,
     provider=None,
@@ -232,6 +241,7 @@ def make_covers(
                     lyrics_text=file_lyrics,
                     detail=detail,
                     text_mode=text_mode,
+                    title_mode=title_mode,
                     mood_override=mood_override,
                     engine=engine,
                     provider=provider,

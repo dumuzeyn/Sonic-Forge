@@ -68,7 +68,9 @@ class LocalImageProvider(ImageGenerationProvider):
         print("Загрузка локальной модели...")
         print("Создание изображения...")
         image = self.backend.generate(request, status.runtime_path, status.model_path)
-        return GeneratedArtwork(image.convert("RGB"), f"{self.name}: {self.backend.name}")
+        info = getattr(self.backend, "last_generation_info", {})
+        note = "; ".join(f"{key}={value}" for key, value in info.items())
+        return GeneratedArtwork(image.convert("RGB"), f"{self.name}: {self.backend.name}", note=note)
 
 
 class Music2PictureProvider(ImageGenerationProvider):

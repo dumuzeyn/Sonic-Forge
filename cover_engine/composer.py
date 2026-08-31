@@ -1,23 +1,31 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from PIL import Image, ImageStat
 
 from .concepts import CoverConceptBuilder
+from .config import CoverGenerationConfig
 from .diversity import DiversityController
 from .profiles import VisualProfileBuilder
 from .providers import AutoImageProvider, CoverRequest
+from .ranking import CandidateReranker
+from .semantic_quality import SemanticQualityEvaluator
+from .titles import clean_artist, resolve_title
 from .typography import TypographyEngine
 
 
 class CoverComposer:
-    def __init__(self, provider=None, profile_builder=None, concept_builder=None, typography=None, diversity=None, semantic=None):
+    def __init__(self, provider=None, profile_builder=None, concept_builder=None, typography=None, diversity=None, semantic=None, config=None):
+        self.config = config or CoverGenerationConfig()
         self.provider = provider or AutoImageProvider()
         self.profile_builder = profile_builder or VisualProfileBuilder()
-        self.concept_builder = concept_builder or CoverConceptBuilder()
+        self.concept_builder = concept_builder or CoverConceptBuilder(self.config)
         self.typography = typography or TypographyEngine()
-        self.diversity = diversity or DiversityController()
-        self.semantic = semantic
+        self.diversity = diversity or DiversityController(strength=self.config.diversity_strength)
+        self.semantic = semantic or (SemanticQualityEvaluator() if self.config.use_semantic_reranking else None)
+        self.reranker = CandidateReranker(self.config.rerank_weights)
+        self._semantic_active = False
 
     def create(
         self,
@@ -31,8 +39,11 @@ class CoverComposer:
         cancel_event=None,
         analysis_bundle=None,
         candidate_limit=None,
+        title_mode=None,
     ):
         profile = self.profile_builder.build(song, seed=seed)
+        self._log_profile(profile)
+        self._semantic_active = self._prepare_semantic()
         concepts = self.concept_builder.build_candidates(song, profile, seed=seed, detail=detail, count=4)
         ranked = self.diversity.rank(concepts)
         generation_pool = ranked[:3] if detail == "simple" else ranked
@@ -42,6 +53,22 @@ class CoverComposer:
         results = self._generate_candidates(
             generation_pool, profile, size, seed, detail, audio_path, cancel_event, analysis_bundle,
         )
+        results = self._rerank_results(results)
+        if candidate_limit is None and self.diversity.needs_alternative_branch(
+            item[2] for item in results if not item[1].fallback
+        ):
+            print("Первые варианты слишком похожи. Создаётся альтернативная художественная ветка...")
+            alternatives = self.concept_builder.build_candidates(
+                song, profile, seed=seed, detail=detail, count=4, offset=3,
+            )
+            results.extend(self._generate_candidates(
+                self.diversity.rank(alternatives)[:2], profile, size,
+                None if seed is None else seed + 70001,
+                detail, audio_path, cancel_event, analysis_bundle,
+                comparison_fingerprints=tuple(item[2].fingerprint for item in results),
+                label_prefix="D",
+            ))
+            results = self._rerank_results(results)
         local_results = [item for item in results if not item[1].fallback]
         accepted = [item for item in local_results if item[2].accepted]
         if local_results and not accepted and candidate_limit is None:
@@ -56,6 +83,8 @@ class CoverComposer:
                 comparison_fingerprints=tuple(item[2].fingerprint for item in results),
                 label_prefix="R",
             ))
+            results = self._rerank_results(results)
+            local_results = [item for item in results if not item[1].fallback]
             accepted = [item for item in results if not item[1].fallback and item[2].accepted]
 
         fallback_results = [item for item in results if item[1].fallback]
@@ -74,13 +103,39 @@ class CoverComposer:
             print(f"Fallback used: {artwork.provider}; reason: {artwork.note}")
         else:
             print(f"Local AI used: {artwork.provider}")
-        print(f"Выбран лучший вариант: {concept.concept_id}")
+        print(
+            f"Выбран лучший вариант: {concept.concept_id}; итог={assessment.score:.1f}; "
+            f"смысл={assessment.metrics.get('semantic_relevance', 0):.2f}; "
+            f"эстетика={assessment.metrics.get('aesthetic_quality', 0):.2f}; "
+            f"композиция={assessment.metrics.get('composition_quality', 0):.2f}; "
+            f"зона текста={assessment.metrics.get('title_safe_area', 0):.2f}; "
+            f"соответствие концепции={assessment.metrics.get('concept_fit', 0):.2f}"
+        )
+
+        title_resolution = resolve_title(
+            song.title,
+            title_mode or self.config.title_mode,
+            profile=profile,
+            short_enabled=self.config.short_artistic_title_enabled,
+        )
+        print(
+            f"Режим названия: {title_resolution.mode}; отображается: {title_resolution.selected}; "
+            f"уверенность={title_resolution.confidence:.2f}; fallback={'да' if title_resolution.fallback_used else 'нет'}"
+        )
+        if self.config.typography_style_mode != "auto":
+            concept = replace(
+                concept,
+                typography_style=self.config.typography_style_mode,
+                typography_locked=True,
+            )
 
         image = self.typography.compose(
             artwork.image,
-            song.title,
-            song.artist,
+            title_resolution.selected,
+            clean_artist(song.artist),
             profile=concept,
+            song_profile=profile,
+            title_treatment=title_resolution,
             enabled=text_mode != "none",
             show_artist=text_mode == "title_artist",
             language=profile.language,
@@ -96,7 +151,10 @@ class CoverComposer:
         with Image.open(output_path) as saved_image:
             self._validate(saved_image.convert("RGB"), size)
         self.diversity.register(concept, assessment)
-        self._save_profile(output_path, profile, concept, artwork, assessment, results, typography_layout, analysis_bundle)
+        self._save_profile(
+            output_path, profile, concept, artwork, assessment, results,
+            typography_layout, analysis_bundle, title_resolution, self.config,
+        )
         return output_path, profile, concept, artwork
 
     def _generate_candidates(
@@ -130,8 +188,13 @@ class CoverComposer:
                 analysis_bundle=analysis_bundle,
             ))
             assessment = self.diversity.assess(concept, artwork.image, local_fingerprints)
-            if self.semantic is not None and not artwork.fallback:
-                assessment = self.semantic.apply(assessment, artwork.image, concept)
+            if self._semantic_active and not artwork.fallback:
+                try:
+                    assessment = self.semantic.apply(assessment, artwork.image, concept)
+                except Exception as exc:
+                    self._semantic_active = False
+                    print(f"  Семантическая проверка отключена: {exc}")
+            if "semantic_combined" in assessment.metrics:
                 print(
                     "  Семантика: "
                     f"объект={assessment.metrics['semantic_object']:.3f}; "
@@ -144,23 +207,53 @@ class CoverComposer:
             if artwork.fallback:
                 print(f"  Аварийный вариант: {artwork.note}")
                 break
-            if assessment.accepted:
-                print(f"  Принят в финальный отбор: {assessment.score:.1f}")
-            else:
+            if assessment.reasons:
                 print(f"  Отклонён: {', '.join(assessment.reasons)}")
+            else:
+                print("  Передан в итоговое сравнение")
             local_fingerprints.append(assessment.fingerprint)
         return results
+
+    def _prepare_semantic(self):
+        if self.semantic is None:
+            print("Семантический reranking отключён настройкой")
+            return False
+        if hasattr(self.semantic, "prepare"):
+            available, reason = self.semantic.prepare(
+                auto_download=self.config.auto_download_semantic
+            )
+        else:
+            available, reason = self.semantic.status()
+        print(f"Semantic evaluator: {'loaded' if available else 'not loaded'}; {reason}")
+        return available
+
+    def _rerank_results(self, results):
+        reranked = []
+        for concept, artwork, assessment in results:
+            final = self.reranker.apply(assessment, self._semantic_active and not artwork.fallback)
+            print(
+                f"  Оценка {concept.concept_id}: {final.score:.1f} | "
+                f"semantic={final.metrics.get('semantic_relevance', 0):.2f}, "
+                f"aesthetic={final.metrics.get('aesthetic_quality', 0):.2f}, "
+                f"composition={final.metrics.get('composition_quality', 0):.2f}, "
+                f"text={final.metrics.get('title_safe_area', 0):.2f}, "
+                f"diversity={final.metrics.get('diversity', 0):.2f}, "
+                f"concept-fit={final.metrics.get('concept_fit', 0):.2f}"
+            )
+            reranked.append((concept, artwork, final))
+        return reranked
 
     @staticmethod
     def _log_profile(profile):
         print("Анализ смысла песни...")
-        print(f"Темы: {', '.join(profile.themes)}")
-        print(f"Образы: {', '.join(profile.imagery)}")
-        print(f"Места действия: {', '.join(profile.settings)}")
-        print(f"Смысловые предметы: {', '.join(profile.objects)}")
-        print(f"Эмоциональный конфликт: {', '.join(profile.conflicts)}")
+        print(f"Характер: {profile.narrative_mode}; {profile.core_emotional_thesis}")
+        print(f"Главная метафора: {profile.visual_metaphor}")
+        print(f"Предлагаемая сцена: {profile.scene_suggestion}")
+        print(f"Развитие настроения: {profile.mood_arc}")
+        print(f"Уровень абстракции: {profile.abstraction_level}")
+        print(f"Присутствие человека: {profile.human_presence_suggestion}")
+        print(f"Характер типографики: {profile.typography_mood_hint}")
         print(f"Язык: {profile.language}; текст песни использован: {'да' if profile.lyrics_used else 'нет'}")
-        print(f"Характер звука: {', '.join(profile.audio_character)}")
 
     @staticmethod
     def _validate(image, size):
@@ -172,7 +265,7 @@ class CoverComposer:
             raise RuntimeError("Generated cover is blank or has insufficient visual range")
 
     @staticmethod
-    def _save_profile(output_path, profile, concept, artwork, assessment, results, typography_layout, analysis_bundle=None):
+    def _save_profile(output_path, profile, concept, artwork, assessment, results, typography_layout, analysis_bundle=None, title_resolution=None, config=None):
         cache_dir = output_path.parent / ".sonicforge"
         cache_dir.mkdir(parents=True, exist_ok=True)
         preview_dir = cache_dir / "candidates"
@@ -201,6 +294,19 @@ class CoverComposer:
             "provider_note": artwork.note,
             "quality_assessment": assessment.to_dict(),
             "typography": typography_layout,
+            "title_resolution": title_resolution.to_dict() if title_resolution else None,
+            "generation_config": {
+                "use_semantic_reranking": config.use_semantic_reranking,
+                "title_mode": config.title_mode,
+                "typography_style_mode": config.typography_style_mode,
+                "dynamic_negative_prompt": config.dynamic_negative_prompt,
+                "prompt_compaction": config.prompt_compaction,
+                "diversity_strength": config.diversity_strength,
+                "allow_human_subjects_auto": config.allow_human_subjects_auto,
+                "short_artistic_title_enabled": config.short_artistic_title_enabled,
+                "auto_download_semantic": config.auto_download_semantic,
+                "rerank_weights": config.rerank_weights,
+            } if config else None,
             "candidates": candidates,
         }
         profile_path = cache_dir / f"{output_path.stem}.profile.json"
